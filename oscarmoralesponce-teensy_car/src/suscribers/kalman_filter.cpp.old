@@ -1,0 +1,253 @@
+#include <math.h>
+#include "arm_math.h"
+
+
+using namespace std;
+
+#define DT	     0.01
+#define VARIANCE 0.25
+
+const float32_t F[9] = {
+			1.0, 0.0, DT,
+			0.0, 1.0, DT,
+			0.0, 0.0, 1.0
+};
+
+
+const float32_t G[3] = {
+			0.5*DT*DT,
+			0.5*DT*DT,
+			DT
+};
+
+const float32_t Q[9] = {
+			VARIANCE*DT*DT, VARIANCE*DT*DT, VARIANCE*DT,
+			VARIANCE*DT*DT, VARIANCE*DT*DT, VARIANCE*DT,
+			VARIANCE*DT,    VARIANCE*DT,    VARIANCE
+};
+
+const float32_t H[6] = {
+			1.0, 0.0, 0.0,
+			0.0, 1.0, 0.0
+};
+
+const float32_t I[9] = {
+			1.0, 0.0, 0.0,
+			0.0, 1.0, 0.0,
+			0.0, 0.0, 1.0
+};
+
+float32_t U[1] = {
+			0.0
+};
+
+float32_t X[3] = {
+			0.0,
+			0.0,
+			0.0
+};
+
+float32_t P[9] = {
+			0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0
+};
+
+float32_t K[6] = {
+			0.0, 0.0,
+			0.0, 0.0,
+			0.0, 0.0
+};
+
+float32_t Rx = 0.0, Ry = 0.0;
+float32_t R[4] = {
+			Rx, 0.0,
+			0.0, Ry
+};
+
+float32_t Y[2] = {
+			0.0,
+			0.0
+};
+
+float32_t Z[2] = {
+			0.0,
+			0.0
+};
+
+ // P, Z, R is global
+float32_t X1[3] = { 0.0,
+			    0.0,
+					0.0
+};
+float32_t X2[9] = {  0.0, 0.0, 0.0,
+					  0.0, 0.0, 0.0,
+					  0.0, 0.0, 0.0
+};
+float32_t X4[6] = { 0.0, 0.0, 0.0,
+					0.0, 0.0, 0.0
+};
+float32_t X5[6] = {  0.0, 0.0,
+					  0.0, 0.0,
+					  0.0, 0.0
+};
+float32_t X6[4] = {  0.0, 0.0,
+					  0.0, 0.0
+};
+float32_t X9[2] = {  0.0,
+					  0.0
+};
+
+float32_t X3x1[3];
+float32_t X3x3[9];
+float32_t X2x2[4];
+float32_t X2x1[2];
+
+
+
+arm_matrix_instance_f32 X3x1_arm;
+arm_matrix_instance_f32 X3x3_arm;
+arm_matrix_instance_f32 X2x2_arm;
+arm_matrix_instance_f32 X2x1_arm;
+
+
+arm_matrix_instance_f32 F_arm;
+arm_matrix_instance_f32 G_arm;
+arm_matrix_instance_f32 U_arm;
+arm_matrix_instance_f32 Q_arm;
+arm_matrix_instance_f32 K_arm;
+arm_matrix_instance_f32 H_arm;
+arm_matrix_instance_f32 I_arm;
+arm_matrix_instance_f32 X_arm;
+arm_matrix_instance_f32 P_arm;
+arm_matrix_instance_f32 Y_arm;
+arm_matrix_instance_f32 R_arm;
+arm_matrix_instance_f32 Z_arm;
+
+
+arm_matrix_instance_f32 X1_arm;
+arm_matrix_instance_f32 X2_arm;
+arm_matrix_instance_f32 X3_arm;
+arm_matrix_instance_f32 X4_arm;
+arm_matrix_instance_f32 X5_arm;
+arm_matrix_instance_f32 X6_arm;
+arm_matrix_instance_f32 X7_arm;
+arm_matrix_instance_f32 X8_arm;
+arm_matrix_instance_f32 X9_arm;
+
+void initConstantMatrix()
+{
+	arm_mat_init_f32(&F_arm, 3, 3, (float32_t*)F);
+	arm_mat_init_f32(&G_arm, 3, 1, (float32_t*)G);
+	arm_mat_init_f32(&U_arm, 1, 1, (float32_t*)U);
+	arm_mat_init_f32(&Q_arm, 3, 3, (float32_t*)Q);
+	arm_mat_init_f32(&K_arm, 3, 2, (float32_t*)K);
+	arm_mat_init_f32(&H_arm, 2, 3, (float32_t*)H);
+	arm_mat_init_f32(&I_arm, 3, 3, (float32_t*)I);
+	arm_mat_init_f32(&X_arm, 3, 1, (float32_t*)X);
+	arm_mat_init_f32(&P_arm, 3, 3, (float32_t*)P);
+	arm_mat_init_f32(&Y_arm, 2, 1, (float32_t*)Y);
+	arm_mat_init_f32(&R_arm, 2, 2, (float32_t*)R);
+	arm_mat_init_f32(&Z_arm, 2, 1, (float32_t*)Z);
+
+  
+	arm_mat_init_f32(&X1_arm, 3, 1, (float32_t *) X1);
+	arm_mat_init_f32(&X2_arm, 3, 3, (float32_t *) X2);
+	arm_mat_init_f32(&X3_arm, 3, 3, (float32_t *) X2);
+	arm_mat_init_f32(&X4_arm, 2, 3, (float32_t *) X4);
+	arm_mat_init_f32(&X5_arm, 3, 2, (float32_t *) X5);
+	arm_mat_init_f32(&X6_arm, 2, 2, (float32_t *) X6);
+	arm_mat_init_f32(&X7_arm, 2, 2, (float32_t *) X6);
+	arm_mat_init_f32(&X8_arm, 3, 2, (float32_t *) X5);
+	arm_mat_init_f32(&X9_arm, 2, 1, (float32_t *) X9);
+	arm_mat_init_f32(&X3x1_arm, 3, 1, (float32_t *) X3x1);
+	arm_mat_init_f32(&X3x3_arm, 3, 3, (float32_t *) X3x3);
+	arm_mat_init_f32(&X2x2_arm, 2, 2, (float32_t *) X2x2);
+	arm_mat_init_f32(&X2x1_arm, 2, 1, (float32_t *) X2x1);
+
+}
+
+bool KalmanFilter_Flow(float x, float y)
+{
+     
+        
+      Z[0] = x;
+      Z[1] = y;
+
+    
+
+      arm_mat_mult_f32( &F_arm, &X_arm, &X1_arm);
+      arm_mat_mult_f32( &G_arm,  &U_arm, &X3x1_arm);
+      arm_mat_add_f32( &X1_arm,  &X3x1_arm, &X_arm);
+      // XTemp = F*XPrev + u*G
+
+      arm_mat_mult_f32( &F_arm, &P_arm, &X3x3_arm);
+      arm_mat_trans_f32( &F_arm, &X3_arm);
+      arm_mat_mult_f32( &X3x3_arm, &X3_arm, &X2_arm);
+      arm_mat_add_f32( &X2_arm, &Q_arm, &P_arm);
+      // P = (F*P)*F' + Q
+
+      arm_mat_mult_f32( &H_arm, &P_arm, &X4_arm);
+      arm_mat_trans_f32( &H_arm, &X5_arm);
+      arm_mat_mult_f32( &X4_arm, &X5_arm, &X2x2_arm);
+      arm_mat_add_f32( &X2x2_arm, &R_arm, &X6_arm);
+      arm_mat_mult_f32( &P_arm, &X5_arm, &X8_arm);
+      if ((X6[0] == 0.0 && X6[1] == 0.0 && X6[2] == 0.0 && X6[3] == 0.0) ||
+	  ARM_MATH_SINGULAR == arm_mat_inverse_f32( &X6_arm, &X7_arm))
+      {
+	  return false;
+      }
+      arm_mat_mult_f32( &X8_arm, &X7_arm, &K_arm);
+      // K = (P*H')*((H*P)*H'+R)^-1
+
+      arm_mat_mult_f32( &H_arm, &X_arm, &X2x1_arm);
+      arm_mat_sub_f32( &Z_arm, &X2x1_arm, &X9_arm);
+      arm_mat_mult_f32( &K_arm, &X9_arm, &X1_arm);
+      arm_mat_add_f32( &X_arm, &X1_arm, &X3x1_arm);
+      X[0] = X3x1[0];
+      X[1] = X3x1[1];
+      X[2] = X3x1[2];
+      
+      // XPres = XTemp + k* (Z-(H*XTemp))
+      //XPrev  = XPres;
+ 
+       arm_mat_mult_f32( &K_arm, &H_arm, &X2_arm);
+       arm_mat_sub_f32( &I_arm, &X2_arm, &X3x3_arm);
+       arm_mat_mult_f32( &P_arm, &X3x3_arm, &P_arm);
+      // P = (I-(K*H)) * P;	  // 3 X 3
+
+
+
+//	U[0] = sqrt(pow((Y[0]-X[0]),2)+pow((Y[1]-X[1]),2))/pow(DT,2);
+
+      float32_t  a1=0.1;
+      float32_t temp1 = (X[0]-Y[0]);
+      float32_t temp2 = (X[1]-Y[1]);
+      float32_t a = (temp1*temp1+ temp2*temp2);
+      if (arm_sqrt_f32(a, &a1) != ARM_MATH_ARGUMENT_ERROR )
+	  return false;
+      
+      U[0] = a1 / DT*DT;
+
+
+      arm_mat_mult_f32( &H_arm, &X_arm, &Y_arm);
+      // (2,1) =(2,3) *(3*1)
+      // Y = H*Xpres
+
+      // ******* Add equation for R ********//
+      // (2,2)
+      // R = Y- Z
+      //R = MatrixSub (Y,Z);
+      Rx = Y[0]-Z[0];//[i*Col+j]
+      Ry = Y[1]-Z[1];//[i*Col+j]
+      return true;
+}
+
+
+void getState(float *posx, float *posy)
+{
+    *posx = Y[0];
+    *posy = Y[1];
+}
+
+

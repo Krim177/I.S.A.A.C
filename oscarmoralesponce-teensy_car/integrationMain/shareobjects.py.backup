@@ -1,0 +1,9 @@
+lock = None
+code = 0
+distance =  0
+offset = 0
+sensorDistance1 = 0
+sensorDistance2 = 0
+sensorDistance3 = 0
+
+

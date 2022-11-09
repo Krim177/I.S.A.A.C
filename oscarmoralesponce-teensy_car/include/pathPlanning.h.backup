@@ -1,0 +1,9 @@
+#ifndef   __AUTOPILOT_TASK__
+#define   __AUTOPILOT_TASK__
+
+
+
+void autopilotInit();
+bool autopilotTest();
+
+#endif

@@ -1,0 +1,621 @@
+#include <math.h>
+#include "arm_math.h"
+
+
+
+#include <Arduino.h>
+
+
+using namespace std;
+
+#define DT	     0.001
+#define VARIANCE 0.25
+#define HDTS     0.5*DT*DT
+
+const float32_t F[16] = {
+			1.0, 0.0, DT, 0.0,
+			0.0, 1.0, 0.0, DT,
+			0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 0.0, 1.0
+
+};
+
+const float32_t G[8] = {
+			HDTS, 0.0,
+			0.0, HDTS,
+			DT, 0.0,
+			0.0, DT
+};
+
+const float32_t Q[16] = {
+			0.0, 0.0, VARIANCE*HDTS, 0.0,
+			0.0, 0.0, 0.0, VARIANCE*HDTS,
+			0.0, 0.0, VARIANCE*HDTS, 0.0,
+			0.0, 0.0, 0.0, VARIANCE*HDTS
+};
+
+const float32_t H[16] = {
+			0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 0.0, 1.0,
+			1.0, 0.0, 1.0, 0.0,
+			0.0, 1.0, 0.0, 1.0
+};
+
+const float32_t I[16] = {
+			1.0, 0.0, 0.0, 0.0,
+			0.0, 1.0, 0.0, 0.0,
+			0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 0.0, 1.0
+};
+
+float32_t U[2] = {
+			0.0,
+			0.0
+};
+
+float32_t X[4] = {
+			0.0,
+			0.0,
+			0.0,
+			0.0
+};
+
+float32_t P[16] = {
+			0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0, 0.0
+};
+
+float32_t K[16] = {
+		0.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 0.0
+};
+
+float32_t Rf = 0.0, Rg= 0.0;
+float32_t R[16] = {
+			Rf, 0.0, 0.0, 0.0,
+			0.0, Rf, 0.0, 0.0,
+			0.0, 0.0, Rg, 0.0,
+			0.0, 0.0, 0.0, Rg
+};
+
+
+float32_t Z[4] = {
+			0.0,
+			0.0,
+			0.0,
+			0.0
+};
+
+arm_matrix_instance_f32 F_arm;
+arm_matrix_instance_f32 G_arm;
+arm_matrix_instance_f32 U_arm;
+arm_matrix_instance_f32 Q_arm;
+arm_matrix_instance_f32 K_arm;
+arm_matrix_instance_f32 H_arm;
+arm_matrix_instance_f32 I_arm;
+arm_matrix_instance_f32 X_arm;
+arm_matrix_instance_f32 P_arm;
+arm_matrix_instance_f32 Y_arm;
+arm_matrix_instance_f32 R_arm;
+arm_matrix_instance_f32 Z_arm;
+
+void initConstantMatrix()
+{
+	arm_mat_init_f32(&F_arm, 4, 4, (float32_t*)F);
+	arm_mat_init_f32(&G_arm, 4, 2, (float32_t*)G);
+	arm_mat_init_f32(&U_arm, 2, 1, (float32_t*)U);
+	arm_mat_init_f32(&Q_arm, 4, 4, (float32_t*)Q);
+	arm_mat_init_f32(&K_arm, 4, 4, (float32_t*)K);
+	arm_mat_init_f32(&H_arm, 4, 4, (float32_t*)H);
+	arm_mat_init_f32(&I_arm, 4, 4, (float32_t*)I);
+	arm_mat_init_f32(&X_arm, 4, 1, (float32_t*)X);
+	arm_mat_init_f32(&P_arm, 4, 4, (float32_t*)P);
+	arm_mat_init_f32(&R_arm, 4, 4, (float32_t*)R);
+	arm_mat_init_f32(&Z_arm, 4, 1, (float32_t*)Z);
+}
+
+
+arm_status mat_mult(
+  const arm_matrix_instance_f32 * pSrcA,
+  const arm_matrix_instance_f32 * pSrcB,
+  arm_matrix_instance_f32 * pDst)
+{
+  float32_t *pIn1 = pSrcA->pData;                /* input data matrix pointer A */
+  float32_t *pIn2 = pSrcB->pData;                /* input data matrix pointer B */
+  float32_t *pInA = pSrcA->pData;                /* input data matrix pointer A  */
+  float32_t *pOut = pDst->pData;                 /* output data matrix pointer */
+  float32_t *px;                                 /* Temporary output data matrix pointer */
+  float32_t sum;                                 /* Accumulator */
+  uint16_t numRowsA = pSrcA->numRows;            /* number of rows of input matrix A */
+  uint16_t numColsB = pSrcB->numCols;            /* number of columns of input matrix B */
+  uint16_t numColsA = pSrcA->numCols;            /* number of columns of input matrix A */
+
+
+  float32_t *pInB = pSrcB->pData;                /* input data matrix pointer B */
+  uint16_t col, i = 0u, row = numRowsA, colCnt;  /* loop counters */
+  arm_status status;                             /* status of matrix multiplication */
+
+#ifdef ARM_MATH_MATRIX_CHECK
+
+  /* Check for matrix mismatch condition */
+  if((pSrcA->numCols != pSrcB->numRows) ||
+     (pSrcA->numRows != pDst->numRows) || (pSrcB->numCols != pDst->numCols))
+  {
+
+    /* Set status as ARM_MATH_SIZE_MISMATCH */
+    status = ARM_MATH_SIZE_MISMATCH;
+  }
+  else
+#endif /*      #ifdef ARM_MATH_MATRIX_CHECK    */
+
+  {
+    /* The following loop performs the dot-product of each row in pInA with each column in pInB */
+    /* row loop */
+    do
+    {
+      /* Output pointer is set to starting address of the row being processed */
+      px = pOut + i;
+
+      /* For every row wise process, the column loop counter is to be initiated */
+      col = numColsB;
+
+      /* For every row wise process, the pIn2 pointer is set     
+       ** to the starting address of the pSrcB data */
+      pIn2 = pSrcB->pData;
+
+      /* column loop */
+      do
+      {
+        /* Set the variable sum, that acts as accumulator, to zero */
+        sum = 0.0f;
+
+        /* Initialize the pointer pIn1 to point to the starting address of the row being processed */
+        pIn1 = pInA;
+
+        /* Matrix A columns number of MAC operations are to be performed */
+        colCnt = numColsA;
+
+        while(colCnt > 0u)
+        {
+          /* c(m,n) = a(1,1)*b(1,1) + a(1,2) * b(2,1) + .... + a(m,p)*b(p,n) */
+          sum += *pIn1++ * (*pIn2);
+          pIn2 += numColsB;
+
+          /* Decrement the loop counter */
+          colCnt--;
+        }
+
+        /* Store the result in the destination buffer */
+        *px++ = sum;
+
+        /* Decrement the column loop counter */
+        col--;
+
+        /* Update the pointer pIn2 to point to the  starting address of the next column */
+        pIn2 = pInB + (numColsB - col);
+
+      } while(col > 0u);
+
+
+      /* Update the pointer pInA to point to the  starting address of the next row */
+      i = i + numColsB;
+      pInA = pInA + numColsA;
+
+      /* Decrement the row loop counter */
+      row--;
+
+    } while(row > 0u);
+    /* Set status as ARM_MATH_SUCCESS */
+    status = ARM_MATH_SUCCESS;
+  }
+
+  /* Return to application */
+  return (status);
+}
+
+
+arm_status mat_inverse(
+  const arm_matrix_instance_f32 * pSrc,
+  arm_matrix_instance_f32 * pDst)
+{
+  float32_t *pIn = pSrc->pData;                  /* input data matrix pointer */
+  float32_t *pOut = pDst->pData;                 /* output data matrix pointer */
+  float32_t *pInT1, *pInT2;                      /* Temporary input data matrix pointer */
+  float32_t *pOutT1, *pOutT2;                    /* Temporary output data matrix pointer */
+  float32_t *pPivotRowIn, *pPRT_in, *pPivotRowDst, *pPRT_pDst;  /* Temporary input and output data matrix pointer */
+  uint32_t numRows = pSrc->numRows;              /* Number of rows in the matrix  */
+  uint32_t numCols = pSrc->numCols;              /* Number of Cols in the matrix  */
+
+
+  /* Run the below code for Cortex-M0 */
+
+  float32_t Xchg, in = 0.0f;                     /* Temporary input values  */
+  uint32_t i, rowCnt, flag = 0u, j, loopCnt, k, l;      /* loop counters */
+  arm_status status;                             /* status of matrix inverse */
+
+#ifdef ARM_MATH_MATRIX_CHECK
+
+  /* Check for matrix mismatch condition */
+  if((pSrc->numRows != pSrc->numCols) || (pDst->numRows != pDst->numCols)
+     || (pSrc->numRows != pDst->numRows))
+  {
+    /* Set status as ARM_MATH_SIZE_MISMATCH */
+    status = ARM_MATH_SIZE_MISMATCH;
+  }
+  else
+#endif /*      #ifdef ARM_MATH_MATRIX_CHECK    */
+  {
+
+    /*--------------------------------------------------------------------------------------------------------------       
+	 * Matrix Inverse can be solved using elementary row operations.        
+	 *        
+	 *	Gauss-Jordan Method:       
+	 *	 	       
+	 *	   1. First combine the identity matrix and the input matrix separated by a bar to form an        
+	 *        augmented matrix as follows:        
+	 *				        _  _	      _	    _	   _   _         _	       _       
+	 *					   |  |  a11  a12  | | | 1   0  |   |       |  X11 X12  |         
+	 *					   |  |            | | |        |   |   =   |           |        
+	 *					   |_ |_ a21  a22 _| | |_0   1 _|  _|       |_ X21 X21 _|       
+	 *					          
+	 *		2. In our implementation, pDst Matrix is used as identity matrix.    
+	 *       
+	 *		3. Begin with the first row. Let i = 1.       
+	 *       
+	 *	    4. Check to see if the pivot for row i is zero.       
+	 *		   The pivot is the element of the main diagonal that is on the current row.       
+	 *		   For instance, if working with row i, then the pivot element is aii.       
+	 *		   If the pivot is zero, exchange that row with a row below it that does not        
+	 *		   contain a zero in column i. If this is not possible, then an inverse        
+	 *		   to that matrix does not exist.       
+	 *	       
+	 *	    5. Divide every element of row i by the pivot.       
+	 *	       
+	 *	    6. For every row below and  row i, replace that row with the sum of that row and        
+	 *		   a multiple of row i so that each new element in column i below row i is zero.       
+	 *	       
+	 *	    7. Move to the next row and column and repeat steps 2 through 5 until you have zeros       
+	 *		   for every element below and above the main diagonal.        
+	 *		   		          
+	 *		8. Now an identical matrix is formed to the left of the bar(input matrix, src).       
+	 *		   Therefore, the matrix to the right of the bar is our solution(dst matrix, dst).         
+	 *----------------------------------------------------------------------------------------------------------------*/
+
+    /* Working pointer for destination matrix */
+    pOutT1 = pOut;
+
+    /* Loop over the number of rows */
+    rowCnt = numRows;
+
+    /* Making the destination matrix as identity matrix */
+    while(rowCnt > 0u)
+    {
+      /* Writing all zeroes in lower triangle of the destination matrix */
+      j = numRows - rowCnt;
+      while(j > 0u)
+      {
+        *pOutT1++ = 0.0f;
+        j--;
+      }
+
+      /* Writing all ones in the diagonal of the destination matrix */
+      *pOutT1++ = 1.0f;
+
+      /* Writing all zeroes in upper triangle of the destination matrix */
+      j = rowCnt - 1u;
+      while(j > 0u)
+      {
+        *pOutT1++ = 0.0f;
+        j--;
+      }
+
+      /* Decrement the loop counter */
+      rowCnt--;
+    }
+
+    /* Loop over the number of columns of the input matrix.     
+       All the elements in each column are processed by the row operations */
+    loopCnt = numCols;
+
+    /* Index modifier to navigate through the columns */
+    l = 0u;
+    //for(loopCnt = 0u; loopCnt < numCols; loopCnt++)   
+    while(loopCnt > 0u)
+    {
+      /* Check if the pivot element is zero..    
+       * If it is zero then interchange the row with non zero row below.   
+       * If there is no non zero element to replace in the rows below,   
+       * then the matrix is Singular. */
+
+      /* Working pointer for the input matrix that points     
+       * to the pivot element of the particular row  */
+      pInT1 = pIn + (l * numCols);
+
+      /* Working pointer for the destination matrix that points     
+       * to the pivot element of the particular row  */
+      pOutT1 = pOut + (l * numCols);
+
+      /* Temporary variable to hold the pivot value */
+      in = *pInT1;
+
+      /* Destination pointer modifier */
+      k = 1u;
+
+      /* Check if the pivot element is zero */
+      if(*pInT1 == 0.0f)
+      {
+        /* Loop over the number rows present below */
+        for (i = (l + 1u); i < numRows; i++)
+        {
+          /* Update the input and destination pointers */
+          pInT2 = pInT1 + (numCols * l);
+          pOutT2 = pOutT1 + (numCols * k);
+
+          /* Check if there is a non zero pivot element to     
+           * replace in the rows below */
+          if(*pInT2 != 0.0f)
+          {
+            /* Loop over number of columns     
+             * to the right of the pilot element */
+            for (j = 0u; j < (numCols - l); j++)
+            {
+              /* Exchange the row elements of the input matrix */
+              Xchg = *pInT2;
+              *pInT2++ = *pInT1;
+              *pInT1++ = Xchg;
+            }
+
+            for (j = 0u; j < numCols; j++)
+            {
+              Xchg = *pOutT2;
+              *pOutT2++ = *pOutT1;
+              *pOutT1++ = Xchg;
+            }
+
+            /* Flag to indicate whether exchange is done or not */
+            flag = 1u;
+
+            /* Break after exchange is done */
+            break;
+          }
+
+          /* Update the destination pointer modifier */
+          k++;
+        }
+      }
+
+      /* Update the status if the matrix is singular */
+      if((flag != 1u) && (in == 0.0f))
+      {
+        return ARM_MATH_SINGULAR;
+      }
+
+      /* Points to the pivot row of input and destination matrices */
+      pPivotRowIn = pIn + (l * numCols);
+      pPivotRowDst = pOut + (l * numCols);
+
+      /* Temporary pointers to the pivot row pointers */
+      pInT1 = pPivotRowIn;
+      pOutT1 = pPivotRowDst;
+
+      /* Pivot element of the row */
+      in = *(pIn + (l * numCols));
+
+      /* Loop over number of columns     
+       * to the right of the pilot element */
+      for (j = 0u; j < (numCols - l); j++)
+      {
+        /* Divide each element of the row of the input matrix     
+         * by the pivot element */
+        *pInT1 = *pInT1 / in;
+        pInT1++;
+      }
+      for (j = 0u; j < numCols; j++)
+      {
+        /* Divide each element of the row of the destination matrix     
+         * by the pivot element */
+        *pOutT1 = *pOutT1 / in;
+        pOutT1++;
+      }
+
+      /* Replace the rows with the sum of that row and a multiple of row i     
+       * so that each new element in column i above row i is zero.*/
+
+      /* Temporary pointers for input and destination matrices */
+      pInT1 = pIn;
+      pOutT1 = pOut;
+
+      for (i = 0u; i < numRows; i++)
+      {
+        /* Check for the pivot element */
+        if(i == l)
+        {
+          /* If the processing element is the pivot element,     
+             only the columns to the right are to be processed */
+          pInT1 += numCols - l;
+          pOutT1 += numCols;
+        }
+        else
+        {
+          /* Element of the reference row */
+          in = *pInT1;
+
+          /* Working pointers for input and destination pivot rows */
+          pPRT_in = pPivotRowIn;
+          pPRT_pDst = pPivotRowDst;
+
+          /* Loop over the number of columns to the right of the pivot element,     
+             to replace the elements in the input matrix */
+          for (j = 0u; j < (numCols - l); j++)
+          {
+            /* Replace the element by the sum of that row     
+               and a multiple of the reference row  */
+            *pInT1 = *pInT1 - (in * *pPRT_in++);
+            pInT1++;
+          }
+          /* Loop over the number of columns to     
+             replace the elements in the destination matrix */
+          for (j = 0u; j < numCols; j++)
+          {
+            /* Replace the element by the sum of that row     
+               and a multiple of the reference row  */
+            *pOutT1 = *pOutT1 - (in * *pPRT_pDst++);
+            pOutT1++;
+          }
+
+        }
+        /* Increment the temporary input pointer */
+        pInT1 = pInT1 + l;
+      }
+      /* Increment the input pointer */
+      pIn++;
+
+      /* Decrement the loop counter */
+      loopCnt--;
+      /* Increment the index modifier */
+      l++;
+    }
+
+
+    /* Set status as ARM_MATH_SUCCESS */
+    status = ARM_MATH_SUCCESS;
+
+    if((flag != 1u) && (in == 0.0f))
+    {
+      pIn = pSrc->pData;
+      for (i = 0; i < numRows * numCols; i++)
+      {
+        if (pIn[i] != 0.0f)
+            break;
+      }
+      
+      if (i == numRows * numCols)
+        status = ARM_MATH_SINGULAR;
+    }
+  }
+  /* Return to application */
+  return (status);
+}
+
+
+
+bool KalmanFilter_Flow(float x, float y, float gx, float gy, float ax, float ay, float *XPos, float *YPos,float *XVel,float *YVel)
+{
+	// P, Z, R is global
+	float32_t X1[4] = { 0.0,
+			            0.0,
+						0.0,
+						0.0
+	};
+	float32_t X4x1[4] = { 0.0,
+				          0.0,
+						  0.0,
+						  0.0
+	};
+	float32_t X2[16] = {  0.0, 0.0, 0.0, 0.0,
+			 	 	 	  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0
+	};
+	float32_t X3[16] = {  0.0, 0.0, 0.0, 0.0,
+			 	 	 	  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0
+	};
+	float32_t X4[16] = {  0.0, 0.0, 0.0, 0.0,
+			 	 	 	  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0,
+						  0.0, 0.0, 0.0, 0.0
+	};
+	float32_t X4x4[16] = {  0.0, 0.0, 0.0, 0.0,
+			 	 	 	  	0.0, 0.0, 0.0, 0.0,
+						    0.0, 0.0, 0.0, 0.0,
+						    0.0, 0.0, 0.0, 0.0
+	};
+	float32_t X5[4] = { 0.0,
+			            0.0,
+						0.0,
+						0.0
+	};
+
+    U[0] = ax;
+    U[1] = ay;
+    Z[0] = x;
+    Z[1] = y;
+    Z[2] = 0.0;
+    Z[3] = 0.0;
+
+	arm_matrix_instance_f32 X1_arm;
+	arm_matrix_instance_f32 X2_arm;
+	arm_matrix_instance_f32 X3_arm;
+	arm_matrix_instance_f32 X4_arm;
+	arm_matrix_instance_f32 X5_arm;
+	arm_matrix_instance_f32 X4x1_arm;
+	arm_matrix_instance_f32 X4x4_arm;
+
+	arm_mat_init_f32(&X1_arm, 4, 1, (float32_t *) X1);
+	arm_mat_init_f32(&X2_arm, 4, 4, (float32_t *) X2);
+	arm_mat_init_f32(&X3_arm, 4, 4, (float32_t *) X3);
+	arm_mat_init_f32(&X4_arm, 4, 4, (float32_t *) X4);
+	arm_mat_init_f32(&X5_arm, 4, 1, (float32_t *) X5);
+	arm_mat_init_f32(&X4x1_arm, 4, 1, (float32_t *) X4x1);
+	arm_mat_init_f32(&X4x4_arm, 4, 4, (float32_t *) X4x4);
+
+
+   // X = F X + Gu
+	mat_mult( &F_arm, &X_arm, &X1_arm);
+	mat_mult( &G_arm,  &U_arm, &X4x1_arm);
+	arm_mat_add_f32( &X1_arm,  &X4x1_arm, &X_arm);
+	
+	// P = (F*P)*F' + Q
+	mat_mult( &F_arm, &P_arm, &X2_arm);
+	arm_mat_trans_f32( &F_arm, &X3_arm);
+	mat_mult( &X2_arm, &X3_arm, &X4x4_arm);
+	arm_mat_add_f32( &X4x4_arm, &Q_arm, &P_arm);
+
+	// K = (P*H')/((H*(P*H')+R)
+	arm_mat_trans_f32( &H_arm, &X2_arm);
+	mat_mult( &P_arm, &X2_arm, &X4_arm);
+	mat_mult( &H_arm, &X4_arm, &X3_arm);
+	arm_mat_add_f32( &X3_arm, &R_arm, &X4x4_arm);
+	if(ARM_MATH_SINGULAR  == mat_inverse( &X4x4_arm, &X3_arm))
+	{
+		return false;
+	}
+	mat_mult( &X4_arm, &X3_arm, &K_arm);	
+	
+	// XPres = XTemp + k* (Z-(H*XTemp))
+	mat_mult( &H_arm, &X_arm, &X4x1_arm);
+	arm_mat_sub_f32( &Z_arm, &X4x1_arm, &X1_arm);
+	mat_mult( &K_arm, &X1_arm, &X4x1_arm);
+	arm_mat_add_f32( &X_arm, &X4x1_arm, &X_arm);
+	//arm_copy_f32((float32_t *)X5, (float32_t *)X, 4);
+    
+    // P = (I-(K*H)) * P;
+	mat_mult( &K_arm, &H_arm, &X2_arm);
+	arm_mat_sub_f32( &I_arm, &X2_arm, &X3_arm);
+	mat_mult( &X3_arm, &P_arm, &X4x4_arm);
+	arm_copy_f32((float32_t *)X4x4, (float32_t *)P, 12);
+	// (4,4) = ((4,4)-((4,4)*(4,4)))*(4,4)
+
+
+	*XPos = X[0];
+	*YPos = X[1];
+	*XVel = X[2];
+	*YVel = X[3];
+
+
+	//arm_mat_mult_f32( &H_arm, &X_arm, &Y_arm);
+	// (4,1) =(4,4) *(4*1)
+	// Y = H*XPres
+
+	return true;
+}
+
+
+
+

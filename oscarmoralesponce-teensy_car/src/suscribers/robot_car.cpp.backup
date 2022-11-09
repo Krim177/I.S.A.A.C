@@ -1,0 +1,108 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+
+#include <PWMServo.h>
+#include <arm_math.h>
+
+#include "config.h"
+#include "HardwareSerial.h"
+
+
+#define MAX_ANGLE 130
+#define MIN_ANGLE 50
+#define CENTER    100
+
+#define MAX_SPEED 90
+#define MIN_SPEED 10
+#define NEUTRAL_SPEED 90
+
+#define STEERING_PIN 6
+
+
+PWMServo  mu;
+uint8_t prevDir= 0;
+
+void carCalibration()
+{
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    Serial3.write(MAX_SPEED);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    Serial3.write(MIN_SPEED);
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+}
+
+
+void carInit(arm_pid_instance_f32 *pidSpeed, arm_pid_instance_f32 *pidCorrection)
+{
+    Serial3.begin(19200);
+    mu.attach(STEERING_PIN);
+    
+    pidSpeed->Kp = 5.0f;
+    pidSpeed->Ki = 0.01f; //0.0027f;
+    pidSpeed->Kd = 0.00f; //0.05f;	
+    
+    pidCorrection->Kp = 15.0f; 
+    pidCorrection->Ki = 0.005;
+    pidCorrection->Kd = 0.0f;
+}
+
+void carRun(uint8_t dir)
+{
+    switch (dir)
+    {
+      case BRAKE:
+	  if (prevDir == FORWARD)
+	  {
+	      Serial3.write(MIN_SPEED);
+// 	      Serial.print("Braking F");
+	  }
+	  else if (prevDir == BACKWARD)
+	  {
+	    Serial3.write(NEUTRAL_SPEED + MAX_SPEED);
+// 	    Serial.print("Braking B");
+	    
+	  }
+	  break;
+      case RESET:
+	  Serial3.write(0);
+	  break;
+      case STANDBY:
+	  Serial3.write(NEUTRAL_SPEED);
+	  break;
+      default:
+	prevDir = dir;
+    }
+}
+
+void carSetActuator(float speed, float correction, float acc, uint8_t dir, float *motorSpeedX, float *motorSpeedY, float *angle)
+{
+      float motorX = 0.001;
+    			
+      if (speed < -10) speed = -10;
+      if (speed > 10) speed = 10;
+	
+       mu.write(CENTER + (int8_t)correction);
+       Serial.print("Speed ");
+       Serial.println(speed);
+		
+      *motorSpeedX = *motorSpeedY = 0.00;
+      *angle = correction/10.0;
+	  
+      if (dir == BACKWARD)
+      {
+//   	  Serial.print("B ");
+//   	  Serial.println(NEUTRAL_SPEED - (int8_t)speed);
+	  Serial3.write(NEUTRAL_SPEED - (int8_t)speed);
+	  *motorSpeedX = motorX * (speed);	  
+      }
+      else if (dir == FORWARD)
+      {
+//    	  Serial.print("F ");
+//    	  Serial.println(NEUTRAL_SPEED + (int8_t)speed);
+	  
+	  Serial3.write(NEUTRAL_SPEED + (int8_t)speed);
+	  *motorSpeedX = -motorX * (speed);	
+      }
+}
+    

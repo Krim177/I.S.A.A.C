@@ -1,0 +1,25 @@
+import serial
+from sys import stdout
+
+
+ser = serial.Serial(port='/dev/ttyACM0', baudrate=115200)
+ser.isOpen()
+b = []
+ 
+while 1: 
+  c = ser.read()
+  #if c in [32, 126] or c == '\n' or c == '\r':
+  try:
+    stdout.write("%c" % c.decode('utf8'))
+  except:
+    stdout.write(hex(c[0]))
+  stdout.flush()
+      
+ser.close()
+
+  
+  
+  
+  
+
+

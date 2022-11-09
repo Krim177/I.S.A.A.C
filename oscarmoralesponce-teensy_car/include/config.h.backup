@@ -1,0 +1,45 @@
+#ifndef   __CONFIG_TASK__
+#define   __CONFIG_TASK__
+
+#include "pubsub.h"
+#include "datastructures.h"
+#include "uartCommand.h"
+
+
+// publihers
+#include "distance.h"
+#include "gps.h"
+#include "mpu.h"
+#include "dwm.h"
+#include "flow.h"
+
+// subscribers
+#include "robot_car.h"
+#include "pathPlanning.h"
+#include "uartCommand.h"
+#include "nrf51822.h"
+#include "dwm.h"
+#include "ldm.h"
+#include "attitude.h"
+#include "report.h"       
+#include "state.h"
+
+#define ORTHOCAR 2
+#define CAR 1
+#define ROVERCAR 3
+#define PARKINGROBOT 4
+
+
+#define UART_TASK  0
+#define NRF_TASK   1
+#define DWM_TASK   0		
+#define FLOW_TASK  0
+#define ROBOT_TASK  CAR
+
+
+#define EXTERNAL_CONTROLLER 2
+#define INTERNAL_CONTROLLER 1
+#define CONTROLLER INTERNAL_CONTROLLER
+
+
+#endif

@@ -1,0 +1,166 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+
+#include "config.h"
+
+
+static bool bInit = false;
+static void pathPlanningTask(void* args);
+QueueHandle_t xLocalCommand;
+TaskHandle_t pathPlanningHandler;
+uint8_t cp = 0;
+
+UARTCommand nullCommand = { .maxTime= 1000,  .speed = 0, .orientation = 0, .distance=0, .dir = STANDBY, .stop = false, .stopCondition = NULL};
+UARTCommand orthoCommand[4] = {
+            { .maxTime= 4000, .speed = 20, .orientation = 0, .distance=20, .dir =LEFT, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 2000, .speed = 20, .orientation = 0, .distance=20, .dir = LEFT, .stop = true, .stopCondition = NULL},
+	    { .maxTime= 4000, .speed = 20, .orientation = 0, .distance=20, .dir = RIGHT, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 2000, .speed = 20, .orientation = 0, .distance=20, .dir = RIGHT, .stop = true, .stopCondition = NULL}};
+
+UARTCommand parkingCommand[4] = {
+            { .maxTime= 200, .speed = 5, .orientation = 0, .distance=30, .dir = FORWARD, .stop = false , .stopCondition = NULL},
+	    { .maxTime= 200, .speed = 0, .orientation = 270, .distance=0, .dir = LEFT, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 200, .speed = 5, .orientation = 0,  .distance=0, .dir = FORWARD, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 200, .speed = 0, .orientation = 270, .distance=0, .dir = LEFT, .stop = false, .stopCondition = NULL}};
+
+	    
+UARTCommand roverCommand[4] = {
+            { .maxTime= 200, .speed = 5, .orientation = -10, .distance=10, .dir = 1, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 200, .speed = 10, .orientation = 10, .distance=10, .dir = 1, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 200, .speed = 5, .orientation = -5, .distance=0, .dir = 0, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 100, .speed = 0, .orientation = 0, .distance=0, .dir = 0, .stop = false, .stopCondition = NULL}};
+ 
+	    
+UARTCommand autoCommand[4] = {
+	    { .maxTime= 500, .speed = 0, .orientation = 0, .distance=0, .dir = STANDBY, .stop = false, .stopCondition = NULL},		  
+	    { .maxTime= 1000, .speed = 8, .orientation = 0, .distance=100, .dir = FORWARD, .stop = false, .stopCondition = NULL}, 
+	    { .maxTime= 500, .speed = 0, .orientation = 0, .distance=10, .dir = STANDBY, .stop = false, .stopCondition = NULL},
+	    { .maxTime= 1000, .speed = 8, .orientation = 0, .distance=100, .dir = FORWARD, .stop = false, .stopCondition = NULL}
+	    };
+
+
+
+
+void pathPlanningInit()
+{
+    if (bInit == false)
+    {
+      xLocalCommand = xQueueCreate(1, sizeof(UARTCommand));
+      xQueueSend( xLocalCommand, ( void * ) &nullCommand, ( TickType_t ) 0 );
+      xTaskCreate(pathPlanningTask, "pathPlanning", configMINIMAL_STACK_SIZE, NULL, 3, &pathPlanningHandler);
+      
+#if CONTROLLER == EXTERNAL_CONTROLLER
+      registerSubscriber(UART_COMMAND, pathPlanningHandler, xLocalCommand);
+#endif
+      
+      bInit = true;
+    }
+}
+
+bool pathPlanningTest()
+{
+    
+    return bInit;
+}
+
+bool getOrthoCommand(UARTCommand *command)
+{
+
+    if (xQueueReceive( xLocalCommand, command, ( TickType_t ) 0 ) == pdTRUE)
+    {
+	xQueueSend( xLocalCommand, &orthoCommand[cp], ( TickType_t ) 0 );
+	cp++;
+	cp %= 4;
+	return true;
+    }
+    memcpy(command, &nullCommand, sizeof(UARTCommand));
+    return false;
+}
+
+bool getParkingCommand(UARTCommand *command)
+{
+
+    if (xQueueReceive( xLocalCommand, command, ( TickType_t ) 0 ) == pdTRUE)
+    {
+	cp = (cp +1)%4;
+	xQueueSend( xLocalCommand, &parkingCommand[cp], ( TickType_t ) 0 );
+	return true;
+    }
+    memcpy(command, &nullCommand, sizeof(UARTCommand));
+    return false;
+}
+
+bool getRoverCommand(UARTCommand *command)
+{
+    if (xQueueReceive( xLocalCommand, command, ( TickType_t ) 0 ) == pdTRUE)
+    {
+       	cp = (cp +1)%4;
+ 	xQueueSend( xLocalCommand, &roverCommand[cp], ( TickType_t ) 0 );
+	return true;
+    }
+    memcpy(command, &nullCommand, sizeof(UARTCommand));
+    return false;
+}
+
+bool getAutoCommand(UARTCommand *command)
+{
+
+    if (xQueueReceive( xLocalCommand, command, ( TickType_t ) 0 ) == pdTRUE)
+    {
+      cp = (cp +1)%4;
+      xQueueSend( xLocalCommand, &autoCommand[cp], ( TickType_t ) 0 );
+      return true;
+    }
+    return false;
+}
+
+bool getNullCommand(UARTCommand *command)
+{
+  
+    memcpy(command, &nullCommand, sizeof(UARTCommand));
+     return true;
+    
+}
+
+bool getCommand(UARTCommand *command)
+{
+#if CONTROLLER == EXTERNAL_CONTROLLER
+    if (xQueueReceive( xLocalCommand, command, ( TickType_t ) 0 ) == pdTRUE)
+    {
+	return true;
+    }
+    memcpy(command, &nullCommand, sizeof(UARTCommand));
+    return true;
+#else
+// #if ROBOT_TASK == ROVERCAR
+//     return getRoverCommand(command);
+// 
+// #elif ROBOT_TASK == ORTHOCAR
+    return getOrthoCommand(command);
+
+// #elif ROBOT_TASK == ORTHOSUSPENSIONCAR
+//     return getOrthoCommand(command);
+
+// #elif ROBOT_TASK == CAR
+//     return getAutoCommand(command);
+
+// #elif ROBOT_TASK == PARKINGROBOT
+//     return getParkingCommand(command);
+    
+ 
+// #endif  
+#endif
+}
+
+void pathPlanningTask(void* args)
+{
+    uint32_t publisherId;
+
+    while (true) {
+        if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+        {
+	  
+        }
+    }
+}

@@ -1,0 +1,36 @@
+#ifndef   __LDM_TASK__
+#define   __LDM_TASK__
+
+#include "datastructures.h"
+
+LDMap *findLDM(uint8_t id, , uint8_t r);
+LDMap *getLDMP(uint8_t index);
+uint8_t LDMapSize();
+
+void ldmInit();
+bool ldmTest();
+
+
+uint8_t  numberOfMembers();
+uint16_t ldmMembersInProgress();
+uint16_t ldmMembersInSync(uint16_t mem);
+
+
+uint32_t minWeightMatching(Point *points, uint32_t n);
+float angleOfPoint(Point point);
+float distance(Point point);
+int join(int prop);
+void SEC(float &radius, float &x, float &y);
+void newRound();
+void addState(LDMap *state);
+
+
+uint8_t getLeader(); 
+uint32_t getMinClock();
+
+
+void startSending();
+void stopSending();
+void addRobotState(LDMap *ldm);
+
+#endif

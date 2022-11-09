@@ -1,0 +1,250 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+#include "config.h"
+
+#include "robot.h"
+#include "autopilot.h"
+#include "pathPlanning.h"
+
+#define SIZE_OF_QUEUE 3
+#define expectedLatency  20
+#define syncrhonizationBound  100
+
+
+// extern 
+bool blocking = false;  
+TaskHandle_t virtualMachineHandler;
+TaskHandle_t externalSensorHandler;
+
+static QueueHandle_t externalSensorQueue;
+static QueueHandle_t stateQueue;
+static QueueHandle_t externalCommandQueue;
+
+
+static void virtualMachineTask(void* args);
+static void externalSensorTask(void* args);
+static void uartExternalCommandSend(void* args);
+
+
+extern uint8_t systemReady;
+
+
+enum {INIT, SNIFFING, TRACKING, LOADING};
+enum {INIT_MOVE, HORIZONTAL_MOVEMENT, VERTICAL_MOVEMENT};
+
+
+static uint8_t state = INIT;
+static uint8_t approaching = INIT_MOVE;
+
+typedef struct _tExternalCommand
+{
+    uint8_t qrcode;
+    uint8_t armcommmand;
+} ExternalCommand;
+
+UARTSensor uartSensor;
+static MessageData messageData;
+
+
+void virtualMachineInit()
+{
+   
+    xTaskCreate(virtualMachineTask, "VM", configMINIMAL_STACK_SIZE, NULL, 3, &virtualMachineHandler);  
+    xTaskCreate(externalSensorTask, "ES", configMINIMAL_STACK_SIZE, NULL, 3, &externalSensorHandler);  
+    
+    
+
+    externalSensorQueue = xQueueCreate(1, sizeof(UARTSensor));
+    registerSubscriber(UART_SENSOR, externalSensorHandler, externalSensorQueue);
+        
+    stateQueue  = xQueueCreate(1, sizeof(LDMap));
+    registerSubscriber(STATE_DATA, virtualMachineHandler, stateQueue);
+    
+    
+    
+#if SENSORS == EXTERNAL_SENSOR
+    xTaskCreate(uartExternalCommandSend, "ECOMM", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+    externalCommandQueue  = xQueueCreate(1, sizeof(ExternalCommand));
+
+#endif
+}
+
+void sendTaskToRasp(uint8_t code, uint8_t task)
+{
+    ExternalCommand command;
+    
+    command.qrcode = code;
+    command.armcommmand = task;
+     
+    
+    xQueueOverwrite(externalCommandQueue, &command);
+ 
+}
+
+
+static void uartExternalCommandSend(void *param)
+{
+     uint8_t *data;
+     uint8_t ch;
+     uint8_t i;
+
+     ExternalCommand command;
+    
+     while (true)
+    {
+	xQueueReceive(externalCommandQueue, &command, portMAX_DELAY);
+        data = (uint8_t *)&command;
+ 	Serial.write(UART_FIRST_BYTE);
+ 	Serial.write(UART_SECOND_BYTE);
+ 	Serial.write(sizeof(command));
+        ch = 0;
+ 	for (i=0; i<sizeof(ExternalCommand); i++)
+ 	{
+ 	    ch = (ch + data[i]) % 256;
+ 	    Serial.write(data[i]);
+ 	 }
+ 	 Serial.write(ch);
+ 	 Serial.write("\n");
+    }
+}
+
+
+
+
+void externalSensorTask(void* args)
+{	
+    uint32_t publisherId;
+    while (true) 
+    {
+        if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+	{
+	    if (xQueueReceive(externalSensorQueue, &uartSensor, ( TickType_t ) 0 )  == pdTRUE) 
+	    {
+ 		  Serial.print("Sensor Reading ");
+ 		  Serial.println(uartSensor.code);
+
+
+		  if (uartSensor.code > 0 && state == INIT)
+		  {
+		      
+			state = TRACKING;
+		  }
+	      
+	    } 
+	}
+    }
+}
+
+
+void approachingFunction(UARTCommand *command, LDMap *ldmap)
+{
+    switch (approaching)
+    {
+	case INIT_MOVE:
+	  command->maxTime= 1000;
+	  command->speed = 10; 
+	  command->orientation = 0;
+	  command->distance=10; 
+	  command->dir = FORWARD;
+	  if (ldmap->position_x >= 5)
+	    approaching = HORIZONTAL_MOVEMENT;
+	  break;
+	case HORIZONTAL_MOVEMENT: 
+	  command->maxTime= 1000;
+	  command->speed = 10; 
+	  command->orientation = 0;
+	  command->distance=10;
+// 	  if (uartSensor.offset > 0)
+// 	    command->dir = LEFT;
+// 	  else 
+// 	    command->dir = RIGHT;
+// 	  if (uartSensor.offset > -1 && uartSensor.offset < 1)
+// 	    approaching = VERTICAL_MOVEMENT; 
+	  break;
+	case VERTICAL_MOVEMENT:
+	  command->maxTime= 1000;
+	  command->speed = 10; 
+	  command->orientation = 0;
+	  command->distance=10; 
+	  command->dir = FORWARD;
+	  if (uartSensor.dist_1 <= 3)
+	    state = LOADING;
+	  break;
+	  
+    }
+}
+
+	    
+void virtualMachineTask(void* args)
+{	
+    portTickType lastWakeTime = xTaskGetTickCount();
+    UARTCommand command;
+//     LDMap     ldmap; 
+
+    
+    command.maxTime= 1000;
+    command.speed = 0; 
+    command.orientation = 0;
+    command.distance=0; 
+    command.dir = STANDBY;
+    uint8_t qrCode;
+    
+    while (!systemReady)
+    {
+         vTaskDelayUntil(&lastWakeTime, 1000 / portTICK_RATE_MS);
+    }
+    
+    while (true) 
+    {
+	vTaskDelayUntil(&lastWakeTime, M2T(1));
+	if (!blocking)
+	{
+	    blocking = true; 	      
+ 	    switch (command.dir)
+ 	    {
+ 	      case FORWARD:
+		 messageData.qrCode= 1;
+		 sendMessageData(&messageData);
+		
+		
+		break;
+	      case RIGHT:
+		 qrCode = getQRCode(1);
+		 if (qrCode == 1)
+		    Serial.println("Everybody has the code");
+		
+		break;
+	    }
+		
+// 		// precondition
+// 		getCommand(&command);
+// 
+// //  		  command.speed = 0;
+// // 		  setInstruction(command);
+// 		// effect 
+// // 		  command.dir = STANDBY;		
+//  		  break;
+//     	      case SNIFFING:
+// 		getNullCommand(&command);
+// //     		command.speed = 0; 
+// //     		command.dir = STANDBY;
+//  		  break;
+//  		case TRACKING:
+// // 		  approachingFunction(&command, &ldmap);
+//  		  break;
+//  	      }
+// 	  
+	    // send data to other nodes
+// 	    sendMessageData(&messageData);
+	    
+	  // send instruction to raspberry pi  
+// 	    sendTaskToRasp(1,2);
+
+   	    getCommand(&command);
+ 	    setInstruction(command);
+
+	}
+    }
+}
+

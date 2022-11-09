@@ -1,0 +1,50 @@
+#ifndef   __UARTCOMMANDS_TASK__
+#define   __UARTCOMMANDS_TASK__
+
+#include "datastructures.h"
+
+#define UART_FIRST_BYTE  'C'
+#define UART_SECOND_BYTE  'O'
+
+struct _tUARTCommand
+{
+    int16_t maxTime;
+    int16_t speed;
+    int16_t orientation;
+    int16_t distance;
+    uint8_t dir;
+};
+
+struct _tUARTMemory
+{
+    int16_t address;
+    uint8_t  length;
+    uint8_t buffer[29];
+};
+
+
+struct _tUARTMemory1
+{
+    int16_t code;
+    int16_t offset_x, offset_y;
+    int16_t sensor1_dist; 
+    int16_t sensor2_dist; 
+    int16_t sensor3_dist;
+};
+
+
+
+typedef struct _tUARTCommand UARTCommand;
+typedef struct _tUARTMemory  UARTMemory;
+typedef struct _tUARTMemory1  UARTObject1;
+
+
+void uartCommandInit();
+bool uartCommandTest();
+bool uartDeliveryData(LDMap *data);
+bool uartDeliveryCommand(UARTCommand *command);
+
+
+
+
+#endif

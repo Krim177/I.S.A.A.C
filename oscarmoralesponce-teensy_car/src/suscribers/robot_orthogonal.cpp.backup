@@ -1,0 +1,603 @@
+//
+//  L293D.c
+//  
+//
+//  Created by Oscar Morales Ponce on 11/21/17.
+//
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+
+#include <Arduino.h>
+#include <arm_math.h>
+
+
+#include "config.h"
+
+#define _pinMotor1IN1  3
+#define _pinMotor1IN2  4
+#define _pinMotor2IN1  5
+#define _pinMotor2IN2  6
+#define _pinMotor3IN1  20
+#define _pinMotor3IN2  21
+#define _pinMotor4IN1  22
+#define _pinMotor4IN2  23
+
+
+#define NORMAL_SPEED 70
+
+typedef struct Motor_T{
+  uint8_t in1;
+  uint8_t in2;
+  uint8_t pwm;
+} Motor;
+
+arm_pid_instance_f32 pidErrorX;
+static float errorX;
+
+Motor motorpwm[4] = {
+		    {.in1 = _pinMotor4IN2,  .in2 = _pinMotor4IN1, .pwm = 0 },
+		    {.in1 = _pinMotor3IN2,  .in2 = _pinMotor3IN1, .pwm = 0 }, 
+		    {.in1 = _pinMotor2IN1,  .in2 = _pinMotor2IN2, .pwm = 0 }, 
+		    {.in1 = _pinMotor1IN1,  .in2 = _pinMotor1IN2, .pwm = 0 }};
+
+
+		    
+void orthoCalibrate()
+{
+  
+}
+
+
+static void flowSensorTask(void* args);
+static TaskHandle_t flowSenHandle = NULL;
+static QueueHandle_t flowQueue;
+static uint8_t currentDir;
+
+
+void orthoInit(arm_pid_instance_f32 *pidSpeed, arm_pid_instance_f32 *pidCorrection)
+{
+    uint8_t i;
+    for (i=0; i<4 ; i++)
+    {
+      pinMode(motorpwm[i].in1, OUTPUT);
+      pinMode(motorpwm[i].in2, OUTPUT);
+      digitalWrite(motorpwm[i].in1, LOW);
+      digitalWrite(motorpwm[i].in2, LOW);
+    }
+
+    pidSpeed->Kp = 3.0f;
+    pidSpeed->Ki = 0.0f;
+    pidSpeed->Kd = 2.5f;
+
+    pidCorrection->Kp = 1.0f; 
+    pidCorrection->Ki = 0.0f;
+    pidCorrection->Kd = 0.01f;
+/*
+     pidErrorX.Kp = 1.725f;
+     pidErrorX.Ki = 0.0000225f;
+     pidErrorX.Kd = 3.8f;*/
+     
+     
+     pidErrorX.Kp = 5.0f;
+     pidErrorX.Ki = 0.0;
+     pidErrorX.Kd = 0.00f;
+
+
+//      arm_pid_init_f32(&pidErrorX, 1);
+    
+     xTaskCreate(flowSensorTask, "FLOWSENS", configMINIMAL_STACK_SIZE, NULL, 4, &flowSenHandle);  
+     flowQueue  = xQueueCreate(1, sizeof(Flow_Data));
+     registerSubscriber(FLOW_DATA, flowSenHandle, flowQueue);
+}
+
+void flowSensorTask(void* args)
+{
+    uint32_t publisherId;
+    while (true)	
+    {
+      if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+      { 
+	 Flow_Data flowData;
+	 if ((currentDir == LEFT || currentDir == RIGHT) && errorX < 9999.0)
+	 {
+	    if (xQueueReceive(flowQueue, &flowData, ( TickType_t ) 0 )  == pdTRUE)
+	    { 
+		  errorX += flowData.deltax * -0.01686; 
+		  
+	    }
+	 }
+      }
+    }
+}
+
+
+void orthoDir(uint8_t dir, Motor *motor)
+{
+  
+    
+    switch (dir)
+    {
+      case BRAKE:
+// 	  Serial.print(dir);
+// 	  Serial.print(" , ");
+// 	  Serial.println(motor->pwm);
+	
+	  analogWrite(motor->in1, 0);
+	  analogWrite(motor->in2, 0);
+	  
+	  digitalWrite(motor->in1, HIGH);
+	  digitalWrite(motor->in2, HIGH);
+ 	  
+	  break;
+      case FORWARD:
+	  analogWrite(motor->in1, motor->pwm);
+	  analogWrite(motor->in2, 0);
+	  digitalWrite(motor->in1, HIGH);
+	  digitalWrite(motor->in2, LOW);
+	  break;
+      case BACKWARD:
+	  analogWrite(motor->in1, 0);
+	  analogWrite(motor->in2, motor->pwm);
+	  digitalWrite(motor->in1, LOW);
+	  digitalWrite(motor->in2, HIGH);
+	  
+	  break;
+       case STANDBY:
+	  analogWrite(motor->in1, 0);
+	  analogWrite(motor->in2, 0);
+	  digitalWrite(motor->in1, LOW);
+	  digitalWrite(motor->in2, LOW);
+	  break;
+    }
+}
+
+
+void orthoRun(uint8_t dir, uint8_t )
+{
+    switch (dir)
+    {
+      case BRAKE:
+
+	  orthoDir(BRAKE, &motorpwm[0]);
+ 	  orthoDir(BRAKE, &motorpwm[1]);
+ 	  orthoDir(BRAKE, &motorpwm[2]);
+ 	  orthoDir(BRAKE, &motorpwm[3]);
+	  break;
+      case FORWARD:
+    
+// 	  Serial.println(" SET FORWARD");
+// 	  Serial.println(motorpwm[0], 8);
+	  
+  	  orthoDir(FORWARD, &motorpwm[0]);
+      	  orthoDir(FORWARD, &motorpwm[1]);
+       	  orthoDir(FORWARD, &motorpwm[2]);
+     	  orthoDir(FORWARD, &motorpwm[3]);
+	  break;
+      case BACKWARD:
+// 	  Serial.println(" SET BACKWARD");
+// 	  Serial.println(motorpwm[0], 8);
+	  
+ 	  orthoDir(BACKWARD, &motorpwm[0]);
+	  orthoDir(BACKWARD, &motorpwm[1]);
+ 	  orthoDir(BACKWARD, &motorpwm[2]);
+	  orthoDir(BACKWARD, &motorpwm[3]);
+	  break;  
+     case LEFT:
+// 	  Serial.println(" SET LEFT");
+// 	  Serial.println(motorpwm[0], 8);
+	 	  
+ 	  orthoDir(BACKWARD, &motorpwm[2]);
+ 	  orthoDir(FORWARD, &motorpwm[1]);
+	  orthoDir(FORWARD, &motorpwm[3]);
+	  orthoDir(BACKWARD, &motorpwm[0]);
+	  
+	  break;
+      case RIGHT:
+// 	  Serial.println(" SET RIGHT");
+// 	Serial.println(motorpwm[0], 8);
+ 	  orthoDir(BACKWARD, &motorpwm[3]);
+ 	  orthoDir(FORWARD, &motorpwm[0]);
+  	  orthoDir(BACKWARD, &motorpwm[1]);
+          orthoDir(FORWARD, &motorpwm[2]);
+	  break; 
+      case ROTATE:
+// 	  Serial.println(" ROTATE");
+
+
+	  break;
+      case STANDBY:
+// 	  Serial.println(" STANDBY");
+	  orthoDir(STANDBY, &motorpwm[0]);
+	  orthoDir(STANDBY, &motorpwm[1]);
+	  orthoDir(STANDBY, &motorpwm[2]);
+	  orthoDir(STANDBY, &motorpwm[3]);
+	  break; 
+    }
+
+}
+
+static int8_t roundsInManeouver = 0;
+
+
+void orthoSetActuator(float speed, float correction, float acc, uint8_t dir, float *motorSpeedX, float *motorSpeedY, float *angle)
+{
+    float motorX = 0.666;
+    float motorY = 0.666;
+    int i =0;
+    
+    currentDir = dir;
+    
+    switch (dir)
+    {
+      case ROTATE:
+     {
+	int16_t pwmCorrecion = 80; //+ abs(correction);
+	errorX = 9999.0;
+        
+// 	if (pwmCorrecion > 90)
+// 	  pwmCorrecion = 90;
+	
+	
+	for (i=0; i<4; i++)
+	{
+	  motorpwm[i].pwm = (uint8_t)pwmCorrecion;
+	}
+	
+//  	Serial.print("Corre ");
+// 	Serial.println(correction);  
+		    
+	
+	if (correction < 0) // Rotate right	  
+	{
+	  orthoDir(FORWARD, &motorpwm[0]);
+	  orthoDir(FORWARD, &motorpwm[3]);
+	  orthoDir(BACKWARD, &motorpwm[1]);
+ 	  orthoDir(BACKWARD, &motorpwm[2]);
+	}
+	else
+	{ 
+	  
+	  orthoDir(BACKWARD, &motorpwm[0]);
+	  orthoDir(BACKWARD, &motorpwm[3]);
+	  orthoDir(FORWARD, &motorpwm[1]);
+ 	  orthoDir(FORWARD, &motorpwm[2]);
+	}
+
+      }
+ 	arm_pid_reset_f32(&pidErrorX);
+	
+        roundsInManeouver = 0;
+      break;
+        case FORWARD:
+	case BACKWARD:
+	{
+	    errorX = 9999.0;
+	    int16_t pwmCorrecion[4];
+	    
+	    pwmCorrecion[0] = NORMAL_SPEED + (int8_t)speed + 2*correction;
+	    pwmCorrecion[1] = NORMAL_SPEED + (int8_t)speed - 2*correction;
+	    pwmCorrecion[2] = NORMAL_SPEED + (int8_t)speed - 2*correction;
+	    pwmCorrecion[3] = NORMAL_SPEED + (int8_t)speed + 2*correction;
+
+	    
+	    for (i=0; i<4; i++)
+	    {
+	      if (pwmCorrecion[i] < 1)
+		pwmCorrecion[i] = 1;
+	      if (pwmCorrecion[i] > 150)
+		pwmCorrecion[i] = 150;
+	      motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+	    }
+	    
+	    orthoRun(dir, 0);
+ 	    arm_pid_reset_f32(&pidErrorX);
+	}
+        roundsInManeouver = 0;
+	break;
+	case LEFT:
+	case RIGHT:
+	 {
+	    int16_t pwmCorrecion[4];
+	    if (errorX > 9998.0)
+	      errorX = 0;
+	    
+ 	    float correction2 = arm_pid_f32(&pidErrorX, errorX);
+	    
+	    
+//  	  if (roundsInManeouver >= 5)
+//  	  {
+// 	      if (abs(*angle) > 2)
+// 	      {		
+// 		    for (i=0; i<4; i++)
+// 		    {
+// 		      motorpwm[i].pwm = 76;
+// 		    }
+// 		    
+// 		    if (*angle < 0) // Rotate right	  
+// 		    {
+// 		      orthoDir(FORWARD, &motorpwm[0]);
+// 		      orthoDir(FORWARD, &motorpwm[3]);
+// 		      orthoDir(BACKWARD, &motorpwm[1]);
+// 		      orthoDir(BACKWARD, &motorpwm[2]);
+// 		    }
+// 		    else
+// 		    { 
+// 		      
+// 		      orthoDir(BACKWARD, &motorpwm[0]);
+// 		      orthoDir(BACKWARD, &motorpwm[3]);
+// 		      orthoDir(FORWARD, &motorpwm[1]);
+// 		      orthoDir(FORWARD, &motorpwm[2]);
+// 		    }
+// 		    arm_pid_reset_f32(&pidErrorX);
+// 	       }
+// 	      else if (abs(errorX) > 2)
+// 	      {
+// 	      
+// 		  pwmCorrecion[0] = NORMAL_SPEED + correction2; //+ 2*correction;
+// 		  pwmCorrecion[1] = NORMAL_SPEED+ correction2; //- 2*correction;
+// 		  pwmCorrecion[2] = NORMAL_SPEED+ correction2; //- 2*correction;
+// 		  pwmCorrecion[3] = NORMAL_SPEED+ correction2; // + 2*correction;
+// 
+// 		  
+// 		  for (i=0; i<4; i++)
+// 		  {
+// 		    if (pwmCorrecion[i] < 1)
+// 		      pwmCorrecion[i] = 1;
+// 		    if (pwmCorrecion[i] > 150)
+// 		      pwmCorrecion[i] = 150;
+// 		    motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+// 		  }
+// 		  
+// 		  if (errorX > 0)
+// 		    orthoRun(BACKWARD, 0);
+// 		  else 
+// 		    orthoRun(FORWARD, 0);
+// 	      } 
+//               else
+//                 roundsInManeouver = 0;
+//            }
+//            if (roundsInManeouver < 5)
+// 	   {
+	     
+		 if (dir == RIGHT)
+		 {	
+		    pwmCorrecion[0] = 160 + (int8_t)speed + correction; //- correction; 
+		    pwmCorrecion[1] = 80 + (int8_t)speed - correction + correction2;
+		    pwmCorrecion[2] = 80 + (int8_t)speed + correction - correction2;
+		    pwmCorrecion[3] = 160 + (int8_t)speed - correction; // + correction; // + correction2;
+	
+		    if (pwmCorrecion[0] > 200) motorpwm[0] = 200;
+		    if (pwmCorrecion[0] >= 80) orthoDir(FORWARD, &pwmCorrecion[0]);
+		    if (pwmCorrecion[0] < 80) pwmCorrecion[0] = (80 - pwmCorrecion[0]);
+		    
+		    
+		    
+		    if (pwmCorrecion[3] < 80) pwmCorrecion[3] = (80 - pwmCorrecion[3]);
+		    if (pwmCorrecion[3] > 200) pwmCorrecion[3] = 200;
+		    
+		      
+		    orthoDir(BACKWARD, &motorpwm[3]);
+ 	  
+  	  orthoDir(BACKWARD, &motorpwm[1]);
+          orthoDir(FORWARD, &motorpwm[2]);
+		    
+		    if (pwmCorrecion[i] < 80)
+			{
+			    pwmCorrecion[i] = pwmCorrecion[0] -80
+			    orthoDir(BACKWARD, &motorpwm[i]);
+			}
+			if (pwmCorrecion[i] > 180)
+			    pwmCorrecion[i] = 180;
+			motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+		    }
+		    
+		  }
+		  else
+		  {
+		    pwmCorrecion[0] = 100 + (int8_t)speed + correction + correction2;
+		    pwmCorrecion[1] = 160 + (int8_t)speed - correction;
+		    pwmCorrecion[2] = 160 + (int8_t)speed + correction; 
+		    pwmCorrecion[3] = 100 + (int8_t)speed - correction - correction2;
+		  }
+	     
+	     
+// 		if (dir == RIGHT)
+// 		  {	
+// 		    pwmCorrecion[0] = 130 + (int8_t)speed; // + correction; //- correction; 
+// 		    pwmCorrecion[1] = 100 + (int8_t)speed - correction; // + correction2;
+// 		    pwmCorrecion[2] = 100 + (int8_t)speed + correction; 
+// 		    pwmCorrecion[3] = 160 + (int8_t)speed; // - correction; // + correction; // + correction2;
+// 		  }
+// 		  else
+// 		  {
+// 		    pwmCorrecion[0] = 100 + (int8_t)speed + correction; //  + correction2;
+// 		    pwmCorrecion[1] = 160 + (int8_t)speed; // - correction;
+// 		    pwmCorrecion[2] = 130 + (int8_t)speed; // + correction; //  + correction2;
+// 		    pwmCorrecion[3] = 100 + (int8_t)speed - correction;
+// 		  }
+// 		  for (i=0; i<4; i++)
+// 		  {
+// 			//Serial.print("RIGHT pwmCorrection: ");
+// 			//Serial.print(i);
+// 			//Serial.print(", ");
+// 			//Serial.println(pwmCorrecion[i]);
+// 			if (pwmCorrecion[i] < 1)
+// 			    pwmCorrecion[i] = 1;
+// 			if (pwmCorrecion[i] > 180)
+// 			    pwmCorrecion[i] = 180;
+// 			motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+// 		  }
+// 		      
+// 		  Serial.print(errorX);
+	    //Serial.print(" PID ");
+	    //Serial.println(correction2);	  
+// 		  orthoRun(dir, 0);
+// 		  roundsInManeouver++;
+// 	  }
+	    
+	   /* if (abs(*angle) > 2)
+	    {
+// 		pwmCorrecion = 80 + abs(correction);
+// 		if (pwmCorrecion > 90)
+// 		  pwmCorrecion = 90;
+		
+		
+		for (i=0; i<4; i++)
+		{
+		  motorpwm[i].pwm = 76;
+		}
+		
+	   	if (*angle < 0) // Rotate right	  
+		{
+		  orthoDir(FORWARD, &motorpwm[0]);
+		  orthoDir(FORWARD, &motorpwm[3]);
+		  orthoDir(BACKWARD, &motorpwm[1]);
+		  orthoDir(BACKWARD, &motorpwm[2]);
+		}
+		else
+		{ 
+		  
+		  orthoDir(BACKWARD, &motorpwm[3]);
+		  orthoDir(BACKWARD, &motorpwm[0]);
+		  orthoDir(FORWARD, &motorpwm[1]);
+		  orthoDir(FORWARD, &motorpwm[2]);
+		}
+ 		arm_pid_reset_f32(&pidErrorX);
+	    }
+	    else if (abs(errorX) > 2)
+	    {
+	      
+		  pwmCorrecion[0] = NORMAL_SPEED + 3; //+ 2*correction;
+		  pwmCorrecion[1] = NORMAL_SPEED + 3; //- 2*correction;
+		  pwmCorrecion[2] = NORMAL_SPEED + 3; //- 2*correction;
+		  pwmCorrecion[3] = NORMAL_SPEED + 3; // + 2*correction;
+
+		  
+		  for (i=0; i<4; i++)
+		  {
+		    if (pwmCorrecion[i] < 1)
+		      pwmCorrecion[i] = 1;
+		    if (pwmCorrecion[i] > 150)
+		      pwmCorrecion[i] = 150;
+		    motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+		  }
+		  
+		  if (errorX > 0)
+		    orthoRun(BACKWARD, 0);
+		  else 
+		    orthoRun(FORWARD, 0);
+	    } 
+	    else 
+	    {
+	      if (dir == RIGHT)
+	      {	
+		pwmCorrecion[0] = 120 + (int8_t)speed; //- correction; 
+		pwmCorrecion[1] = 120 + (int8_t)speed; //- correction; // + correction2;
+		pwmCorrecion[2] = 120 + (int8_t)speed;// + correction; 
+		pwmCorrecion[3] = 120 + (int8_t)speed; // + correction; // + correction2;
+	      }
+	      else
+	      {
+		  pwmCorrecion[0] = 120 + (int8_t)speed; //+ correction; //  + correction2;
+		  pwmCorrecion[1] = 120 + (int8_t)speed; //+ correction;
+		  pwmCorrecion[2] = 120 + (int8_t)speed; //- correction; //  + correction2;
+		  pwmCorrecion[3] = 120 + (int8_t)speed; //- correction;
+	      }
+	      for (i=0; i<4; i++)
+	      {
+	    //Serial.print("RIGHT pwmCorrection: ");
+	    //Serial.print(i);
+	    //Serial.print(", ");
+	    //Serial.println(pwmCorrecion[i]);
+		if (pwmCorrecion[i] < 1)
+		  pwmCorrecion[i] = 1;
+		if (pwmCorrecion[i] > 180)
+		  pwmCorrecion[i] = 180;
+		motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+	      }
+	    
+	      orthoRun(dir, 0);
+	    }  */ 
+	 } 
+	  break;
+/*	case LEFT:
+	{
+	    int16_t pwmCorrecion[4];
+	    if (errorX > 9998.0)
+	      errorX = 0;
+
+	    
+// 	    float correction2 = arm_pid_f32(&pidErrorX, errorX);
+	    
+// 	    Serial.print(errorX);
+// 	    Serial.print(" PID ");
+// 	    Serial.println(correction2);
+	    
+	    pwmCorrecion[0] = 120 + (int8_t)speed + correction  + correction2;
+	    pwmCorrecion[1] = 120 + (int8_t)speed + correction;
+	    pwmCorrecion[2] = 120 + (int8_t)speed - correction  + correction2;
+	    pwmCorrecion[3] = 120 + (int8_t)speed - correction;
+
+	    for (i=0; i<4; i++)
+	    {
+              if (pwmCorrecion[i] < 1)
+		pwmCorrecion[i] = 1;
+	      if (pwmCorrecion[i] > 180)
+		pwmCorrecion[i] = 180;
+	      motorpwm[i].pwm = (uint8_t)pwmCorrecion[i];
+	    }
+// 	    Serial.print("LEFT pwmCorrection: ");
+// 	    Serial.print(pwmCorrecion[0]);
+//           Serial.print(", ");
+// 	  Serial.print(pwmCorrecion[1]);
+// 	  Serial.print(", ");
+// 	  Serial.print(pwmCorrecion[2]);
+// 	  Serial.print(", ");
+// 	  Serial.println(pwmCorrecion[3]);
+	
+	    
+	    orthoRun(dir, 0);
+	    break;
+	}*/
+	default:
+	  errorX = 9999.0;
+	  for (i=0; i<4; i++)
+	  {
+	    motorpwm[i].pwm = 0;
+	  }
+	  orthoRun(dir, 0);
+// 	  arm_pid_reset_f32(&pidErrorX);
+	  break;
+     }
+    
+    
+    float averageSpeed = (motorpwm[0].pwm + motorpwm[1].pwm + motorpwm[2].pwm + motorpwm[3].pwm) / 4.0f;
+   
+//        Serial.print(dir);         
+//        Serial.print(" Set Actuator ");      
+//        Serial.println(averageSpeed);
+    
+    *motorSpeedX = *motorSpeedY = *angle = 0.00;
+    switch (dir)
+    {
+      case BRAKE:
+	  *motorSpeedX = 0;
+	  break;
+      case FORWARD:
+      case BACKWARD:
+	  *motorSpeedX = averageSpeed * motorX;
+	  break;  
+      case LEFT:
+      case RIGHT:
+	  *motorSpeedY = averageSpeed * motorY;
+	  break; 
+      case STANDBY:
+	  *motorSpeedX = 0;
+	  break; 
+    }
+   
+    // *angle = correction * PI / 180.0;
+
+}
+

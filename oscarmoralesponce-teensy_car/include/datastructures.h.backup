@@ -1,0 +1,325 @@
+#ifndef __DATASTRUCTURE_H__
+#define __DATASTRUCTURE_H__
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include <arm_math.h>
+
+
+//Milliseconds to OS Ticks
+#define M2T(X) (portTickType)(X*(configTICK_RATE_HZ/1000.0))
+#define F2T(X) ((portTickType)((configTICK_RATE_HZ/(X))))
+
+#define MAX_SUB 20
+#define MAX_PUB 20
+
+#define LOCODECK_NR_OF_ANCHORS 5
+#define RADIOLINK_TX_QUEUE_SIZE 1
+#define RADIOLINK_RX_QUEUE_SIZE 1
+
+#define MPU_DATA  1
+#define MPU_MAG    2
+#define ATTITUDE_DATA    3
+#define FLOW_DATA  4
+#define DWM_DATA  5
+#define STATE_DATA 6
+#define NRF_DATA  7
+#define GPS_DATA  8
+#define UART_COMMAND  9
+#define OBSTACLE_DATA  10
+#define UART_MEMORY  11
+#define NRF_CONTROL_DATA 12
+#define UART_SENSOR 13
+
+
+
+#define MPU_UPDATE 1
+#define MPU_RATE_HZ 1000/(float)MPU_UPDATE
+#define MPU_UPDATE_DT 1/MPU_RATE_HZ
+#define G 9.81
+
+#define FLOW_SPEED 10
+#define FLOW_SPEED_HZ 1000/(float)FLOW_SPEED
+#define FLOW_SPEED_DT  1/(float)FLOW_SPEED_HZ
+
+
+#define EXPECTEDLATENCY  30
+#define SYNCHRONIZATIONROUND 20
+#define ROUNDLENGTH 150
+
+
+#define RATE_ROBOT  3   // Herz
+#define UPDATE_RATE_ROBOT  RATE_ROBOT / 1000.0f   // milliseconds
+
+
+
+#define MAGNETOMETER 0
+
+enum { READY, IN_PROGRESS, SYNC, VOTING };
+enum { AUTONOMOUS, COOPERATIVE };
+
+enum {RESET, STANDBY, BRAKE, FORWARD, BACKWARD, LEFT, RIGHT, ROTATE,  UP, DOWN, HOVER, NIL};
+enum { INCOMPLETED_TIOA, COMPLETED_TIOA};
+
+
+
+TaskHandle_t getAutoPilotHandler();
+
+
+
+#include <Arduino.h>
+typedef struct
+{
+    float x,y,z;
+} Point;
+
+typedef struct
+{
+    Point acc;
+    Point rawacc;
+    Point gyro;
+    Point mag;
+} Mpu_Data;
+
+
+typedef struct
+{
+    float intertiaAx, intertiaAy, intertiaAz;
+    float gyroZ;
+    float yaw;
+//     float pitch;
+//     float roll;
+    float heading;
+} Attitude_Data;
+
+typedef struct
+{
+    float deltax;
+    float deltay;
+} Flow_Data;
+
+
+typedef struct
+{
+    float x,y, z;
+} Position_Data;
+
+typedef struct
+{
+    float distance;
+    uint8_t error;
+} Distance_Data;
+
+typedef struct
+{
+    float desiredSpeed;  // meter per second
+    float desiredDistance;  // meters
+    int8_t desiredOrientation;   // degree
+    int8_t desiredAngle; // degree
+    int16_t maxTime;  // 100Hz
+} Instruction_Data;
+
+
+typedef struct
+{
+    uint8_t leaderId;  // LeaderID
+    uint8_t members;  // Members
+    uint8_t state;    // State of state machine in TDMA
+    uint8_t time;    // State of state machine in TDMA
+} Control_Data;
+
+typedef struct {
+   int8_t rank : 4;
+   int8_t active : 4;
+   int8_t qrCode : 4;
+   int8_t face : 2;
+   int8_t inCorridor : 1;
+} Params;
+ 
+#define SET_PARAM1(rank, active) ((rank & 0xF) << 4) | (active & 0xF) 
+#define SET_PARAM2(qrcode, face, inCorridor) (qrcode << 4) | ((face & 0x3) << 1) | (inCorridor & 1)
+#define GET_RANK(param) param >> 4
+#define GET_ACTIVE(param) param  & 0xF
+#define GET_CODE(param) param >> 4 
+#define GET_FACE(param) (param >> 1) & 0x3
+#define GET_CORRIDOR(param) (param & 0x1)
+
+typedef struct _tMessageData {   
+   int16_t Xdistance;
+   int16_t Ydistance;
+   uint8_t  param1;
+   uint8_t  param2;
+   uint8_t globalState;
+   uint8_t boxWidth;  // face 1 or 3
+   uint8_t boxLength; // face 0 or 2
+} MessageData;
+
+
+typedef struct LDMap_t {
+//    uint32_t clock;
+   float position_x,position_y; //,position_z; // decimenter 
+   
+   int16_t speed; 
+   uint16_t members;
+   uint16_t membersInProgress;
+   uint16_t membersInSync;
+   int16_t heading;
+   uint8_t id;
+   uint8_t leaderId;
+   uint8_t operationMode;
+   
+   uint8_t tioaState;   
+   uint8_t instruction;
+   uint8_t rssi;
+   uint8_t propose:7;
+   uint8_t isRotating:1;
+   MessageData messageData;
+   
+} LDMap;
+
+typedef struct
+{
+    void (*init)();
+    void (*calibrate)();
+    void (*setRun)(uint8_t, uint8_t);
+    void (*setSpeed)(float , float , float, float, float, uint8_t, float *, float *, LDMap *);
+} RobotModel;
+
+typedef struct
+{
+    float w,x,y,z;
+} Quaternion;
+
+typedef struct _tExternalCommand
+{
+	uint8_t qrcode;
+	uint8_t globalState;
+	uint8_t localState;
+	uint8_t a;	
+} ExternalCommand;
+
+struct _tUARTCommand
+{
+    int16_t maxTime;
+    int16_t speed;
+    int16_t orientation;
+    int16_t distance;
+    uint8_t dir;
+    uint8_t stop;
+    uint8_t temp1;
+    uint8_t temp2;
+    bool (*stopCondition)();
+    void (*adaptingOrientation)(Quaternion *p, Quaternion *q);
+};
+
+struct _tUARTMemory
+{
+    int16_t address;
+    uint8_t length;
+    uint8_t buffer[29];
+};
+
+
+struct _tUARTSensors
+{
+    uint16_t code;
+    int16_t distance;
+    int16_t offset;
+    int16_t angle;
+    int16_t dist_0; 
+    int16_t dist_1; 
+    int16_t dist_2; 
+    int16_t dist_3;
+    int16_t dist_4;
+//     int16_t validityCamera;
+//     int16_t validityDistance;
+};
+
+
+typedef struct _tParameters
+{
+    int8_t offset[2];
+    int32_t speed_p;
+    int32_t speed_i;
+    int32_t speed_d;
+    int32_t lspeed_p;
+    int32_t lspeed_i;
+    int32_t lspeed_d;
+    int32_t rotation_p;
+    int32_t rotation_i;
+    int32_t rotation_d;
+    int32_t correction_p;
+    int32_t correction_i;
+    int32_t correction_d;
+} Parameters;
+
+
+typedef struct _tUARTCommand UARTCommand;
+typedef struct _tUARTCommand CarCommand;
+typedef struct _tUARTMemory  UARTMemory;
+typedef struct _tUARTSensors  UARTSensor;
+typedef struct _tUARTSensors  ExternalSensor; 
+
+void copyQuaternion(Quaternion *p, Quaternion *q);
+void conjugate(Quaternion *q, Quaternion *r);
+void diff(Quaternion *q, Quaternion *r, Quaternion *t);
+void inverse(Quaternion *q, Quaternion *r);
+void multiplyQuaternion(Quaternion *q, Quaternion *r, Quaternion *t);
+float dot(Quaternion *q, Quaternion *r);
+float getAngleFromQuaternion(Quaternion *q);
+void initQuaternion(Quaternion *q, float yaw, float pitch, float roll);
+
+
+uint8_t getId();	
+uint8_t getRobotType();
+uint16_t getErrorCode();
+
+float deadband(float value, const float threshold);
+float invSqrt(float x);
+
+void sendMessageData(MessageData *data);
+void sendTaskToExternalComputer(uint8_t code, uint8_t global, uint8_t local);
+
+
+typedef struct {
+  void (*init)();
+  uint8_t (*newRound)(CarCommand *, LDMap *, uint8_t , uint32_t );
+  uint8_t (*endOfRound)(LDMap *, uint8_t *, uint32_t, uint8_t, int16_t, int16_t );
+  uint8_t (*OnExternalSensor)(ExternalSensor *, LDMap *, uint8_t *);
+} TIOAAlgorithm;
+
+
+uint8_t OnExternalSensorOrtho(ExternalSensor *externalSensorReading, LDMap *ldmap, uint8_t *globalState);
+uint8_t onNewOrthoRobot(CarCommand *command, LDMap *ldmap, uint8_t globalState, uint32_t clock);
+uint8_t onEndOrthoRobot(LDMap *ldmap, uint8_t *globalState, uint32_t clock, uint8_t code, int16_t distance,  int16_t angle);
+void onInitAerospace();
+  
+
+uint8_t shiftLeft(CarCommand *command, LDMap *ldmap, uint8_t *globalState, uint32_t clock);
+uint8_t approachingStateMachine(CarCommand *command, LDMap *ldmap, uint8_t *globalState, uint32_t clock);
+
+void virtualComplete(uint8_t code, int16_t distance, int16_t angle);
+
+
+//  Virtual machine
+void setDistanceToTraverse(uint16_t distance);
+void setAngleToRotate(int16_t angle);
+uint8_t moveRobot(CarCommand *command, uint16_t dir, bool condition= false, int16_t speed = 10,  bool stop = false, int16_t orientation = 0);
+uint8_t moveForward(CarCommand *command, bool condition = false, int16_t speed = 10,  bool stop = false, int16_t orientation = 0);
+uint8_t moveBackward(CarCommand *command, bool condition= false, int16_t speed = 10, bool stop = false, int16_t orientation = 0);
+uint8_t moveLeft(CarCommand *command, bool condition= false, int16_t speed = 10, bool stop = false, int16_t orientation = 0);
+uint8_t moveRight(CarCommand *command,  bool condition= false, int16_t speed = 10, bool stop = false, int16_t orientation = 0);
+uint8_t rotateCar(CarCommand *command,  uint8_t dir, bool stop = false);
+uint8_t rotate(CarCommand *command,  bool stop = false);
+
+bool distanceCompleted();
+int16_t distanceTraversed();
+bool rotationCompleted();
+
+
+
+
+
+
+
+#endif

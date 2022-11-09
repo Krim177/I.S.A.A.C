@@ -1,0 +1,156 @@
+import threading
+import time
+import serial
+from struct import *
+import array
+import sys
+import signal
+
+from shareobjects import ShareObjects 
+#from sensors import Sensors
+#from codereader import CodeReader
+#from listener import Listener
+
+
+
+class SerialCar(threading.Thread):
+
+  def __init__(self, rate, shareObjects):
+    threading.Thread.__init__(self)
+    self.serial = None
+    self.rate = rate
+    self.shareObjects = shareObjects
+    self.porti = 0
+
+  def boundUnsigned(self, x) :
+      if x > 2000: 
+          x = 2000
+      if x < 0:
+          x = 0
+      return x
+  
+  def boundSigned(self, x) :
+      if x > 2000: 
+          x = 2000
+      if x < -2000:
+          x =-2000
+      return x
+
+
+  def payload(self, code, distance, offset, angle, sensor0, sensor1, sensor2, sensor3, sensor4):
+    ch = 0
+    length = 18
+    pay = pack('hHhhHHHHH', self.boundSigned(code), self.boundUnsigned(int(distance)), self.boundSigned(int(offset)), 
+            self.boundSigned(int(angle)), self.boundUnsigned(int(sensor0)), self.boundUnsigned(int(sensor1)), 
+            self.boundUnsigned(int(sensor2)), self.boundUnsigned(int(sensor3)), self.boundUnsigned(int(sensor4)))
+    a = array.array('b', pay).tolist()
+    for i in range(0, length):
+      ch = (ch + int(a[i])) % 256
+
+    pay = pack('BBB', 67, 79, length) + pay + pack('B', ch)
+    return pay
+    
+  def connect(self) :   
+    try:
+       self.serial = serial.Serial(port='/dev/ttyACM{0}'.format(self.porti), baudrate=115200, timeout=0)
+       
+    except:
+       self.porti = (self.porti + 1) % 5
+       pass
+      
+  def readSerial(self):
+    
+      readLines = False
+      lines = []
+      try:
+        lines = self.serial.read(150).splitlines()     
+        readLines = True
+      except:
+        #print("Error in reading")
+        self.connect()
+      if readLines:
+        for c in lines:
+           if len(c) == 8:
+              (m1, m2, l, qr, globalState, localState, a, ch) = unpack('BBBBBBBB', c) 
+              if m1== 67 and m2 == 79 and (qr + globalState +  localState + a) == ch:  # testing if the message is correct
+                 self.shareObjects.lock.acquire(True)
+                 self.shareObjects.code = qr
+                 self.shareObjects.globalState = globalState
+                 self.shareObjects.localState = localState
+                 self.shareObjects.lock.release()
+                 if globalState == 6 and localState == 105:
+                    self.shareObjects.seenCode = False
+           else:
+             print("Teensy {0}".format(c.decode("utf-8")))
+      
+      
+
+  def writeData(self):
+    
+       
+      self.shareObjects.lock.acquire(True) 
+      #print("Sending to serial ", self.shareObjects.code, self.shareObjects.sensorDistance1)
+      code = self.shareObjects.code
+      distance = self.shareObjects.distance
+      offset = self.shareObjects.offset
+      angle = self.shareObjects.angle
+#      if angle != 0:
+#        print("PYTHON angle {0}".format(angle))
+      sensorDist0 = self.shareObjects.sensorDistance[0]
+      sensorDist1 = self.shareObjects.sensorDistance[1]
+      sensorDist2 = self.shareObjects.sensorDistance[2]
+      sensorDist3 = self.shareObjects.sensorDistance[3]
+      sensorDist4 = self.shareObjects.sensorDistance[4]
+      #print('Sensor0 ', self.shareObjects.sensorDistance0)
+      #print('Sensor1 ', self.shareObjects.sensorDistance1)
+
+      #self.shareObjects.distance = 0
+      #self.shareObjects.offset = 0
+      #self.shareObjects.angle = 0
+      self.shareObjects.sensorDistance[0] = 999
+      self.shareObjects.sensorDistance[1] = 999
+      self.shareObjects.sensorDistance[2] = 999
+      self.shareObjects.sensorDistance[3] = 999
+      self.shareObjects.sensorDistance[4] = 999
+
+      self.shareObjects.lock.release()
+      pay = self.payload(code, distance, offset, angle, sensorDist0, sensorDist1, sensorDist2, sensorDist3, sensorDist4)
+      try:
+        self.serial.write(pay)  # write payload to serial port      
+      except:
+        #print("Error")
+        self.connect()
+
+  def run(self) :
+    while True:
+      time.sleep(self.rate)
+      self.readSerial()
+      self.writeData()
+
+def main() :    
+  speedCamera = 0.1
+  speedSensor =  0.1
+  speedSerial =  0.1
+
+  shareObject = ShareObjects()
+  shareObject.code = 2
+  #sensors = Sensors(speedSensor, shareObject)
+  #codeReader = CodeReader(speedCamera, shareObject)
+  #listener = Listener(shareObject)
+  serialCar = SerialCar(speedSerial, shareObject)
+  #sensors.start()
+  #codeReader.start()
+  #listener.start()
+  serialCar.start()      
+
+
+  serialCar.join()
+  #sensors.join()
+  #codeReader.join()
+  #listener.join()
+
+
+
+if __name__ == '__main__':
+    main()
+
