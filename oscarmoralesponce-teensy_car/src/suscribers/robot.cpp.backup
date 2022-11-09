@@ -1,0 +1,410 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+
+#include <PWMServo.h>
+#include <arm_math.h>
+
+
+#include "config.h"
+#include "HardwareSerial.h"
+#include "robot.h"
+
+
+#define MAX_ANGLE 130
+#define MIN_ANGLE 50
+#define CENTER    90
+
+#define MAX_SPEED 180
+#define MIN_SPEED 10
+#define NEUTRAL_SPEED 90
+
+#define MOTOR_PIN 3
+#define STEERING_PIN 6
+
+
+#define CALIBRATE 1
+
+
+uint8_t completed = READY;
+bool setRobotInstruction = false;
+static bool bInit = false;
+static void robotTask(void* args);
+static void stateRobotTask(void* args);
+
+// static QueueHandle_t stateQueue;
+static QueueHandle_t xCommand;
+float orientation = 0;
+float totalDistance = 0;
+
+arm_pid_instance_f32 pidSpeed;
+arm_pid_instance_f32 pidCorrection;
+arm_pid_instance_f32 pidRotation;
+static QueueHandle_t stateQueue;
+static QueueHandle_t attitudeQueue;
+static float yaw = 0.0f;
+
+
+
+
+RobotModel robotModel;
+TaskHandle_t robotHandle = NULL;
+TaskHandle_t stateRobotHandle = NULL;
+static LDMap     ldmap; 
+static float initialX = 0;
+
+extern uint8_t systemReady;
+static SemaphoreHandle_t mutex;
+
+
+void robotInit()
+{
+    mutex = xSemaphoreCreateMutex();
+    xTaskCreate(robotTask, "ROBOT", configMINIMAL_STACK_SIZE, NULL, 3, &robotHandle);
+    xTaskCreate(stateRobotTask, "STR", configMINIMAL_STACK_SIZE, NULL, 3, &stateRobotHandle);
+    
+    bInit = true;
+    xCommand = xQueueCreate(1, sizeof(UARTCommand));
+    stateQueue  = xQueueCreate(1, sizeof(LDMap));
+    attitudeQueue  = xQueueCreate(1, sizeof(Attitude_Data));
+    
+    registerSubscriber(STATE_DATA, stateRobotHandle, stateQueue);
+    registerSubscriber(ATTITUDE_DATA, stateRobotHandle, attitudeQueue);
+
+    completed = READY;
+    
+     switch (getRobotType())
+     {
+       case ROVERCAR:
+	  robotModel.init = roverInit;
+	  robotModel.calibrate = roverCalibrate;
+	  robotModel.setRun = roverRun;
+	  robotModel.setSpeed = roverSetActuator;
+	  break;
+       case ORTHOCAR:
+	  robotModel.init = orthoInit;
+	  robotModel.setRun = orthoRun;
+	  robotModel.calibrate = orthoCalibrate;
+	  robotModel.setSpeed = orthoSetActuator;
+	  break;
+       case ORTHOSUSPENSIONCAR:
+	  robotModel.init = orthoSuspensionInit;
+	  robotModel.setRun = orthoSuspensionRun;
+	  robotModel.calibrate = orthoSuspensionCalibrate;
+	  robotModel.setSpeed = orthoSetSuspensionActuator;
+	  break;
+       case CAR:
+	  robotModel.init = carInit;
+	  robotModel.calibrate = carCalibration;
+	  robotModel.setRun = carRun;
+	  robotModel.setSpeed = carSetActuator;
+	  break;
+     }
+    robotModel.init(&pidSpeed, &pidRotation, &pidCorrection);
+    
+}
+
+bool robotTest()
+{
+    return bInit;
+}
+
+void robotSetInstruction(RobotInstructionState *ins)
+{
+    UARTCommand command;
+    command.maxTime= ins->maxMilliseconds>>2; 
+    
+    command.speed = ins->speed; 
+    command.distance = ins->distance;
+    command.orientation = ins->orientation; 
+    command.dir = ins->currentInstruction;
+    command.stop = ins->stop;
+    command.stopCondition = ins->stopCondition;
+    command.adaptingOrientation = ins->adaptingOrientation;
+    
+      
+    xQueueSend( xCommand, &command, ( TickType_t ) 0 );
+}
+
+uint8_t robotGetStatus()
+{
+     if (setRobotInstruction && completed == READY)
+     {
+	setRobotInstruction = false;
+	return true;
+     }
+     return false;
+}
+
+
+
+float prevSpeed;
+
+
+
+float performInstruction(UARTCommand *command, LDMap  *ldmap, float diffAngle)
+{
+    float speedX;
+    float speedY;	
+    float angle = 0;
+    float32_t diffSpeed = (float32_t)(command->speed - ldmap->speed);
+    float commonSpeed = arm_pid_f32(&pidSpeed, diffSpeed);
+  
+    float correction = arm_pid_f32(&pidCorrection, diffAngle);
+    float rotation = arm_pid_f32(&pidRotation, diffAngle);
+//      Serial.print(diffAngle);  
+//      Serial.print(" PID ");
+//      Serial.println(correction);  
+    
+    if (commonSpeed < 0) commonSpeed = 0.0;
+    if (commonSpeed > 200) commonSpeed = 200.0;
+    
+    float acc = ldmap->speed - prevSpeed;
+    prevSpeed = ldmap->speed;
+       
+    
+    robotModel.setSpeed(commonSpeed, rotation, correction, acc, command->dir, &speedX, &speedY, ldmap);
+    setMotorSpeed(speedX, speedY, angle);   // this
+    return correction;
+}
+
+
+void stateRobotTask(void* args)
+{
+    uint32_t publisherId;
+    LDMap ldmaptemp;
+    Attitude_Data attitudeData;
+    while (true)
+    {
+      
+	if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+	{
+	    switch (publisherId)
+	    {
+		case  ATTITUDE_DATA: 	  
+		  if (xQueueReceive(attitudeQueue, &attitudeData, ( TickType_t ) 0 ) == pdTRUE)
+		  {
+		      xSemaphoreTake(mutex, portMAX_DELAY);
+		      yaw = attitudeData.yaw;
+		      xSemaphoreGive(mutex);
+		      Serial.println("New Yaw");
+		  }
+		  break;
+		case STATE_DATA:
+		  if (xQueueReceive(stateQueue, &ldmaptemp, ( TickType_t ) 0 ) == pdTRUE)
+		  {
+		    memcpy(&ldmap, &ldmaptemp, sizeof(LDMap));
+		  }
+		  break;
+	    }
+	}
+    }
+}
+
+float getDiffAngle(Quaternion *q)
+{
+    float diffAngle;
+    Quaternion  p, diffQ;
+    initQuaternion(&p, yaw * PI/180.0f, 0.0f, 0.0f);
+    diff(&p, q, &diffQ);
+    diffAngle = getAngleFromQuaternion(&diffQ) * 180.0f / PI;
+    Serial.print(yaw);  
+    Serial.print(",");  
+    Serial.print(getAngleFromQuaternion(&diffQ));  
+    
+    Serial.print(" DiffAngle");
+    Serial.println(diffAngle);  
+    return diffAngle;
+}
+
+
+void robotTask(void* args)
+{
+    UARTCommand command;
+    Quaternion  q;
+    
+    int16_t   maxTime = 0;
+    uint32_t clock = 0;
+    
+    float prevPosX = 0, prevPosY = 0;
+    float diffAngle = 0;
+    bool stopCar = true;
+    
+    portTickType lastWakeTime = xTaskGetTickCount();
+    
+    arm_pid_init_f32(&pidSpeed, 1);
+    arm_pid_init_f32(&pidRotation, 1);
+    arm_pid_init_f32(&pidCorrection, 1);
+     
+    
+    vTaskDelayUntil(&lastWakeTime, 200 / portTICK_RATE_MS);
+    while (!systemReady)
+    {
+         vTaskDelayUntil(&lastWakeTime, 100 / portTICK_RATE_MS);
+    }
+    
+    while (true) 
+    {
+        clock++;
+        vTaskDelayUntil(&lastWakeTime, M2T(RATE_ROBOT));
+	if (completed == READY)
+	{
+	    if (xQueueReceive(xCommand, &command, ( TickType_t ) 0 )  == pdTRUE)
+	    {
+	      completed = IN_PROGRESS;
+	      setRobotInstruction = true;
+	      
+
+	      maxTime = command.maxTime;
+	      orientation = command.orientation;	      
+	      if (orientation > 180) 
+		orientation = orientation - 360;
+	      if (orientation < -180) 
+		orientation = 360 + orientation;
+	      
+	      initQuaternion(&q, orientation * PI/180.0f, 0.0f, 0.0f);
+	      
+	      totalDistance = command.distance * command.distance;
+	      prevPosX = ldmap.position_x;
+	      prevPosY = ldmap.position_y;
+	      initialX = ldmap.position_x;
+	      
+   	      Serial.print("Command ");
+//   	      Serial.println(totalDistance);
+//   	      Serial.print(" (");	
+//  	      Serial.print(prevPosX);
+//  	      Serial.print(", ");
+// 	      Serial.print(prevPosY);
+// 	      Serial.print(",");
+ 	      Serial.print(orientation);
+ 	      Serial.print(",");
+  	      Serial.println(yaw);
+	      
+	      arm_pid_reset_f32(&pidCorrection);
+              arm_pid_reset_f32(&pidSpeed);
+	      stopCar = command.stop;
+	      robotModel.setRun(BRAKE, 0);
+	    }
+	    else
+	    {
+	      if (stopCar)
+		robotModel.setRun(BRAKE, 0);
+	      else
+	      {
+		  if (command.stopCondition != NULL && command.stopCondition())
+		  {
+		    command.speed = 0;
+		    stopCar = true;
+		    robotModel.setRun(BRAKE, 0);
+		  }
+		  else
+		  {
+		    if (command.speed > 0)
+		      command.speed = command.speed >> 0;
+		    else 
+		      command.speed = 0;
+		    diffAngle = getDiffAngle(&q);
+		    performInstruction(&command, &ldmap, diffAngle);  
+		  }
+	      }
+	    }
+	}
+	else 
+	{    
+	    float dist = 0;
+/*	    
+	    if (command.adaptingOrientation != NULL)
+	    {
+		Quaternion r;
+		command.adaptingOrientation(&q, &r);
+		copyQuaternion(&r, &q);		
+	    }*/
+	    
+	    float posX = ldmap.position_x - prevPosX;
+	    float posY = ldmap.position_y - prevPosY;
+  
+	    dist =  (posX*posX) + (posY*posY);	
+  //   		Serial.print(" Pos ");
+  //     		Serial.print(ldmap.position_x);
+  // 		Serial.println(posY*posY);
+  //  		Serial.println(totalDistance);
+  //   		totalDistance -= dist;
+	    diffAngle = getDiffAngle(&q);
+	    
+// 	      Serial.print("New heading " );
+// 	      Serial.println(yaw);
+	      	      
+	      if (command.dir == FORWARD || command.dir == BACKWARD || command.dir == LEFT || command.dir == RIGHT)
+	      {
+// 		    if (totalDistance <= 1)	
+// 			  command.speed  -= UPDATE_RATE_ROBOT * command.speed / 2.0f;
+		    if (dist  >= totalDistance  &&  completed != READY)
+		    {
+ 			  Serial.print(totalDistance);
+   			  Serial.print("--- COMPLETED ");
+ 			  Serial.print(command.dir);
+ 			  Serial.print(" (");	
+ 			  Serial.print(ldmap.position_x);
+ 			  Serial.print(", ");
+ 			  Serial.println(ldmap.position_y);
+  			  completed = READY;	      
+			  virtualComplete(0, command.distance - totalDistance, 0);
+
+		    }
+	      }
+	      if (command.stopCondition != NULL && command.stopCondition())
+	      {
+ 		  completed = READY;
+ 		  virtualComplete(0, command.distance - totalDistance, 0);
+ 		  command.speed = 0;
+  		  stopCar = true;
+		  robotModel.setRun(BRAKE, 0);
+		   Serial.print("stopCondition");
+   			  Serial.print("--- COMPLETED ");
+ 			  Serial.print(command.dir);
+ 			  Serial.print(" (");	
+ 			  Serial.print(ldmap.position_x);
+ 			  Serial.print(", ");
+ 			  Serial.println(ldmap.position_y);
+
+	      }
+	      if (completed != READY && command.dir == ROTATE && abs(diffAngle) < 1 && ldmap.isRotating)
+	      {
+		Serial.print(diffAngle);  
+		Serial.print(" Heading Completed ");
+		Serial.println(yaw);  
+		completed = READY;
+
+		virtualComplete(0, command.distance - totalDistance, 0);
+	      }
+	      maxTime--;
+ 	      if (command.dir == STANDBY && maxTime < (command.maxTime >> 1) && completed != READY) 
+ 	      {
+ 		  completed = READY;
+		  virtualComplete(0, command.distance + dist, 0);    
+ 		  robotModel.setRun(BRAKE, 0);
+ 	      }
+ 	      if (completed != READY)
+		  performInstruction(&command, &ldmap, diffAngle);
+		
+	      if (maxTime < 0 && completed != READY) 
+	      {
+   		  Serial.print(sqrt(totalDistance));
+ 		  Serial.print(" Timeout ");
+ 		  Serial.print(dist);
+// 		  Serial.print(" (");	
+// 			  Serial.print(ldmap.position_x);
+// 			  Serial.print(", ");
+// 			  Serial.println(ldmap.position_y);
+		  completed = READY;    // Exception
+		  
+		  if (dist  <= sqrt(totalDistance) / 10)
+		    virtualComplete(1, command.distance - totalDistance, 0);
+		  else
+		    virtualComplete(0, command.distance - totalDistance, 0);
+		  robotModel.setRun(BRAKE, 0);
+	      }
+	}
+    }   
+}
+

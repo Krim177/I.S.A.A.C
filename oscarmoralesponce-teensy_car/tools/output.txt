@@ -1,0 +1,112 @@
+VL53L0X_GetDeviceInfo:
+Device Name : VL53L0X ES1 or later
+Device Type : VL53L0X
+Device ID : VL53L0CXV0DH/1$1
+ProductRevisionMajor : 1
+ProductRevisionMinor : 1
+VL53L0X_BETTER_ACCURACY_MODE
+API Status: 0 : No Error
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy 2Sensor Reading 111, -5
+Teensy ST MACHINE 10 0SCANNING 111
+Teensy 2Sensor Reading 102, -12
+Teensy 2Sensor Reading 104, -15
+Teensy 2Sensor Reading 104, -15
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 104, -15
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 104, -15
+Teensy ST MACHINE 10 111SCANNING 104
+Teensy SCANNINGROTATE 104
+Teensy 2Sensor Reading 104, -15
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 103, -16
+Teensy ST MACHINE 10 110SCANNING 103
+Teensy SC ALIGN -16
+Teensy 2Sensor Reading 103, -16
+Teensy 2Sensor Reading 104, -14
+Teensy 2Sensor Reading 106, -9
+Teensy ST MACHINE 10 1SCANNING 106
+Teensy SC END -43
+Teensy ST MACHINE 5 0
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 108HOR Braking 0
+Teensy ST MACHINE 5 5In APPROACHING: 9999, 0
+Teensy ST MACHINE 5 5In APPROACHING: 819, 0
+Teensy ST MACHINE 5 5In APPROACHING: 819, 0
+Teensy ST MACHINE 5 5In APPROACHING: 819, 0
+Teensy ST MACHINE 5 5In APPROACHING: 819, 0
+Teensy ST MACHINE 5 5In APPROACHING: 113, 0
+
+
+
+
+
+
+Teensy ST MACHINE 0 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy ST MACHINE 10 0SCANNING 0
+Teensy ST MACHINE 10 111SCANNING 0
+Teensy SCANNINGROTATE 0
+Teensy 2Sensor Reading 173, -9
+Teensy ST MACHINE 10 0SCANNING 173
+Teensy ST MACHINE 10 111SCANNING 173
+Teensy SCANNINGROTATE 173
+Teensy ST MACHINE 10 110SCANNING 173
+Teensy SC ALIGN -9
+Teensy ST MACHINE 10 1SCANNING 173
+Teensy SC END -71
+Teensy ST MACHINE 5 0
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 103
+Teensy ST MACHINE 5 108HOR Braking 0
+Teensy ST MACHINE 5 102APPROACHING 173, 71
+Teensy NEW offset 27
+Teensy 4.97 TimeoutHeading Completed -5
+Teensy ST MACHINE 5 108HOR Braking 27
+Teensy 3.97 TimeoutHeading Completed -4
+Teensy ST MACHINE 5 108HOR Braking 27
+Teensy ST MACHINE 5 102APPROACHING 121, 71
+Teensy ST MACHINE 5 108HOR Braking 27
+Teensy NEW offset 56
+Teensy NEW offset 57
+Teensy NEW offset 57
+Teensy 3.97 TimeoutHeading Completed -4
+Teensy ST MACHINE 5 108HOR Braking 57
+Teensy ST MACHINE 5 102APPROACHING 132, 0
+Teensy NEW offset 66
+Teensy ST MACHINE 5 108HOR Braking 66
+Teensy 0.00 TimeoutHeading Completed 0
+Teensy ST MACHINE 5 108HOR Braking 66
+Teensy ST MACHINE 5 102APPROACHING 142, 0
+Teensy ST MACHINE 5 108HOR Braking 66
+Teensy 1.99 TimeoutHeading Completed -2
+Teensy ST MACHINE 5 108HOR Braking 66
+
+

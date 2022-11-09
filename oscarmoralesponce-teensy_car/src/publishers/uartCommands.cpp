@@ -1,0 +1,231 @@
+
+#include <FreeRTOS.h>
+#include <task.h>
+#include <semphr.h>
+#include <queue.h>
+#include <avr/io.h>
+
+#include "pubsub.h"
+#include "uartCommand.h"
+#include "datastructures.h"
+#include "config.h"
+#include "autopilot.h"
+
+
+
+#define MAX_BYTES  sizeof(UARTCommand) + 2
+
+
+static uint8_t uartCommandId = 0;
+static uint8_t uartMemoryId = 0;
+static uint8_t uartSensorId = 0;
+extern uint8_t systemReady;
+
+
+enum {UartWaitForFirstStart, UartWaitForSecondStart,
+      UartWaitForLenght, UartWaitForData, UartWaitForCheckSum};
+
+
+uint8_t lenght;
+uint8_t rxUartState;
+uint8_t buffer[sizeof(UARTMemory)+1];
+
+static QueueHandle_t xCommand;
+static QueueHandle_t xMemory;
+static QueueHandle_t xSensor;
+
+TaskHandle_t dataSendHandler = NULL;
+
+
+
+static void uartCommandReceive(void *param);
+
+//#if EXTERNAL_CONTROLLER == CONTROLLER
+static void uartDataSend(void *param);
+//#endif
+
+void uartCommandInit()
+{    
+    rxUartState = UartWaitForFirstStart;
+    
+    xCommand = xQueueCreate(1, sizeof(UARTCommand));
+    xMemory  = xQueueCreate(1, sizeof(UARTMemory));
+    xSensor  = xQueueCreate(1, sizeof(UARTSensor));
+    uartCommandId = registerPublisher(UART_COMMAND, sizeof(UARTCommand), xCommand);
+    uartMemoryId = registerPublisher(UART_MEMORY, sizeof(UARTMemory), xMemory);
+    uartSensorId = registerPublisher(UART_SENSOR, sizeof(UARTSensor), xSensor);
+    xTaskCreate(uartCommandReceive, "cmdReceive", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+    
+//#if EXTERNAL_CONTROLLER == CONTROLLER
+      xTaskCreate(uartDataSend, "uartDataSend", configMINIMAL_STACK_SIZE, NULL, 3, &dataSendHandler);
+
+//#endif
+}
+
+bool uartCommandTest()
+{
+   
+    return xCommand != NULL;
+}
+
+//#if EXTERNAL_CONTROLLER == CONTROLLER
+static void uartDataSend(void *param)
+{
+    uint8_t i;
+    LDMap *ldmap;
+    
+    portTickType lastWakeTime = xTaskGetTickCount();
+    while (!systemReady)
+    {
+         vTaskDelayUntil(&lastWakeTime, 100 / portTICK_RATE_MS);
+    }
+    while (true)
+    {
+        vTaskDelayUntil(&lastWakeTime, 200 / portTICK_RATE_MS);
+	
+        for (i=1; i<= LDM_SIZE; i++)
+        {
+            ldmap = getLDMP(i);
+            if (ldmap->id > 0)
+            {    
+                
+              /*Serial.print("DD6,");
+              Serial.print(ldmap->id+1);
+              Serial.print(",");
+              Serial.print(ldmap->operationMode);
+              Serial.print(",");
+              Serial.print(ldmap->tioaState);
+              Serial.print(",");
+              Serial.println(ldmap->messageData.globalState);
+              */
+              Serial.write(UART_FIRST_BYTE);
+              Serial.write(UART_SECOND_BYTE);
+              Serial.write(sizeof(LDMap));
+              uint8_t i;
+              uint8_t ch = 0;
+              char *data = (char *)ldmap;
+              for (i=0; i<sizeof(LDMap); i++)
+              {
+                  ch = (ch + data[i]) % 256;
+                  Serial.write(data[i]);
+              }
+              Serial.write(ch);
+              Serial.println();
+               
+            }
+        }
+    }
+}
+//#endif
+
+
+static void uartCommandReceive(void *param)
+{
+  unsigned char c;
+  unsigned char ch = 0;
+  uint8_t iByte = 0;
+  uint8_t maxNumConsecutiveBytes = 0;
+  portTickType lastWakeTime = xTaskGetTickCount();
+  
+  while (true)
+  {
+    vTaskDelayUntil(&lastWakeTime, 1 / portTICK_RATE_MS);
+    maxNumConsecutiveBytes = MAX_BYTES;
+//      Serial.println(Serial.available());
+    while (Serial.available() > 0)
+    {
+        maxNumConsecutiveBytes--;
+        if (maxNumConsecutiveBytes == 0)
+        {
+            maxNumConsecutiveBytes= MAX_BYTES;
+            vTaskDelayUntil(&lastWakeTime, 1/portTICK_RATE_MS);
+        }
+        c = Serial.read();
+        switch (rxUartState)
+        {
+            case UartWaitForFirstStart:
+                if (c == UART_FIRST_BYTE)
+		{
+            rxUartState = UartWaitForSecondStart;
+//      		Serial.println("First");
+		}
+                break;
+            case UartWaitForSecondStart:
+                if (c == UART_SECOND_BYTE)
+		{
+                    rxUartState = UartWaitForLenght;
+  //        		    Serial.println("second");
+		}
+                else
+                    rxUartState = UartWaitForFirstStart;
+                break;
+            case UartWaitForLenght:
+
+    //        Serial.print("Wating ");
+   	//	    Serial.println(c);
+		   
+                if (sizeof(UARTCommand) == c || sizeof(UARTMemory) == c || sizeof(UARTSensor))
+                {
+                    ch = 0;
+                    lenght = c;
+                    iByte = 0;
+                    rxUartState = UartWaitForData;
+                }
+                else
+                    rxUartState = UartWaitForFirstStart;
+                break;
+            case UartWaitForData:
+                if (iByte < lenght)
+                {
+                    ch = (ch + c)%256;
+                    buffer[iByte++] = c;
+//   		    Serial.print("byte");
+//   		    Serial.println(iByte);
+                }
+                if (iByte >= lenght)
+                    rxUartState = UartWaitForCheckSum;
+                break;
+            case UartWaitForCheckSum:
+                //  accept if the calculated ch is equal to c
+// 	       Serial.print(sizeof(UARTCommand));
+//   		    Serial.print("-");
+//    		    Serial.print(ch);
+//   		    Serial.print(" ");
+//   		    Serial.println(c);
+		   
+	        if (ch == c)
+            {
+   	    	switch (lenght)
+		    {
+                case sizeof(UARTCommand):
+                UARTCommand command;
+                memcpy(&command, buffer, sizeof(UARTCommand));   
+                xQueueOverwrite(xCommand, &command);
+                //Serial.print("Received ");
+                //Serial.println(command.speed);
+                //Serial.print(" Command ");
+                //Serial.println((int)command.dir);
+                publish(uartCommandId);
+                break;
+		      case sizeof(UARTMemory): 
+                xQueueOverwrite(xMemory, &buffer);
+//         			  Serial.println("Receive Memory");
+
+                publish(uartMemoryId);
+                break;
+		      case sizeof(UARTSensor):
+                xQueueOverwrite(xSensor, &buffer);
+    //  				Serial.println("Sensor Reading");
+                publish(uartSensorId);
+			  break;
+		    }
+                }
+                rxUartState = UartWaitForFirstStart;
+                break;
+        }
+    }
+  }
+}
+    
+
+

@@ -1,0 +1,517 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+#include <semphr.h>
+#include "config.h"
+#include "state.h"
+#include "robot.h"
+#include "uartCommand.h"
+#include <arm_math.h>
+#include "Aerospace.h"
+
+#if APPLICATION  == AEROSPACE_WITH_ROS	
+
+#define __DEBUG__
+      
+
+/*********************************************************************************************
+*  OnExternalSensorOrtho receives the reading from the external computer, i.e., Raspberry PI
+* Params: 
+*     externalSensorReading: is the reading that the external comptuer sends
+* 	globalState: The state of the main state machine
+*******************************************************************************************/
+uint8_t OnExternalSensorOrtho(ExternalSensor *externalSensorReading, LDMap *ldmap, uint8_t *globalState)
+{
+    xSemaphoreTake(mutex, portMAX_DELAY);
+
+
+
+    xSemaphoreGive(mutex);
+    return 0;
+}
+
+
+void onInitAerospace()
+{
+    mutex = xSemaphoreCreateMutex();
+    stateData.active = 0;
+    stateData.faceTraverse = 0;
+    stateData.currentFace  = 0;
+    stateData.boxWidth = 0;
+    stateData.boxLength = 0;
+    stateData.Xdistance = 0;
+    stateData.Ydistance = 0;
+    stateData.YDone = false;
+    stateData.XDone = false;
+    stateData.isRobotInCorridor = false;
+    stateData.localState = INIT;
+    externalSensor.distance = 0;
+    externalSensor.angle = 0;
+    
+    
+    pidAligning.Kp = ALIGN_PROPORTIONAL;
+    pidAligning.Ki = ALIGN_INTEGRAL;
+    pidAligning.Kd = ALIGN_DERIVATE;
+
+
+    arm_pid_init_f32(&pidAligning, 1);
+
+}
+
+void sendMessages(uint8_t globalState)
+{
+    MessageData messageData;
+    
+    messageData.param1 = SET_PARAM1(stateData.rank, stateData.active);
+    messageData.param2 = SET_PARAM2(externalSensor.code, stateData.currentFace, stateData.isRobotInCorridor);
+    messageData.Xdistance = stateData.Xdistance;
+    messageData.Ydistance = stateData.Ydistance;
+    messageData.globalState = globalState;
+    messageData.boxWidth = stateData.boxWidth;
+    messageData.boxLength = stateData.boxLength;
+    sendMessageData(&messageData);
+}
+
+
+// Main state machine
+uint8_t onNewOrthoRobot(CarCommand *command, LDMap *ldmap, uint8_t globalState, uint32_t clock)
+{
+   
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    sendTaskToExternalComputer(externalSensor.code, globalState, stateData.localState);
+    
+    Serial.print("DD1,");
+    Serial.print((int)getId());
+    Serial.print(",");
+    debugPrintState(globalState);
+    Serial.print(",");
+    debugPrintState(stateData.localState);
+    Serial.print(",");
+    debugPrintState(stateData.stateSecondLevel);
+    Serial.print(",");
+    Serial.print(stateData.rank);
+    Serial.print(",");
+    Serial.print(stateData.active);
+     Serial.print(",");
+    Serial.print(externalSensor.code);
+    Serial.println("");
+    command->adaptingOrientation = NULL;
+    sendMessages(globalState);
+    
+    switch (globalState) 
+    {
+//          case DEBUG:
+//  	      moveRight(command, false, 20, true);      
+// 	    align(command, ldmap, MIN_DISTANCE_HORIZONTAL, MAX_DISTANCE_HORIZONTAL);
+// 	      break;
+	case INIT:
+	  break;
+	case SCANNING:
+	  scanningCodeInitRound(command, ldmap,  stateData.localState, clock);
+	  break;    
+	case BROADCAST:
+	  break;
+	case APPROACHING:
+        approachingStateMachineInitRound(command,  ldmap, stateData.localState, clock);
+        break;
+    case PREPARE_TO_MOVE:
+        changeFaceInitFace(command, ldmap, stateData.localState, clock);  
+        break;
+    case RELOCATE_ON_FACE:
+        relocateOnFaceInitRound(command, ldmap, stateData.localState, clock);
+        break;
+    case PUSH_BOX:
+    case TEST_PUSH_BOX:
+        pushBoxInitRound(command);
+        break;
+    case OBSTACLE_AVOIDANCE:
+    case CHANGE_FACE:
+//         if (stateData.localState == INIT && !areBothSensorsInBounds())
+//         {
+//             command->stopCondition = stopWhenBothSensorsAreInBounds;
+//             if (stateData.rank == 1 && stateData.active > 1)
+//                 moveLeft(command, false, 10, true);
+            
+//             if (stateData.rank == stateData.active && stateData.active > 1)
+//                 moveRight(command, false, 10, true);
+//         }
+//         else
+            changeFaceInitFace(command, ldmap, stateData.localState, clock);
+        break;
+    case WAIT:
+    case WAIT_TEST:
+        break;
+    case STABILIZE:
+        command->stopCondition = stopWhenLeftSensorisInBound;
+	moveRight(command);
+     break;
+	case END:
+	    break;
+	default:
+	    break;
+    }
+     xSemaphoreGive(mutex);
+    return 0;
+}
+
+
+
+// Main state machine
+uint8_t onEndOrthoRobot(LDMap *ldmap, uint8_t *globalState, uint32_t clock, uint8_t errCode, int16_t lastDistance, int16_t lastAngle)
+{	 
+    bool existsRobotInOtherFace = false;
+    uint8_t code = externalSensor.code;
+    uint8_t rank = 0;
+    uint8_t maxRank  = 0;
+    uint8_t membersInBroadcast=0, membersWithRank=0;
+    uint8_t membersInWait=0;
+    uint8_t stateRobotRankMinus1=INIT, stateRobotRankPlus1=INIT;
+    int8_t activeInFace;
+    uint8_t stateOfActive = 0;
+    uint8_t membersLocal = 0;
+    uint8_t isAnchorOn = LEFT;
+    bool isRobotInCorridor = false;
+
+    
+//     Serial.print("*****ERROR CODE ");
+//     Serial.println(errCode);
+ // Getting the data that robots shared in the previous round   
+    stateData.previousRankFailures++;
+    switch (*globalState) 
+    {
+       case INIT:      
+	   stateData.previousRankFailures = 0;
+           membersLocal =  getScanningCode(&code); 
+	  
+	   break;
+       case SCANNING:
+	    stateData.previousRankFailures = 0;
+	    membersLocal =  getMembers(); 
+	    break;
+       case BROADCAST:
+	    stateData.previousRankFailures = 0;
+// 	    membersLocal =  getBroadcastData(&rank, &maxRank, &membersWithRank, &stateOfActive,  (uint8_t)BROADCAST, &membersInBroadcast, PREPARE_TO_MOVE);
+	    
+	    break;
+       case APPROACHING: 
+	  getApproachingData(stateData.rank, &stateData.boxLength, &stateData.boxWidth,  &stateData.isRobotInCorridor,  
+			       &stateData.previousRankFailures, &activeInFace, &stateData.Xdistance, &stateData.Ydistance, &stateData.active);
+	 
+// 	    if (stateData.rank > stateData.active && stateData.isRobotInCorridor)
+	    {
+// 		stateData.currentFace = activeInFace;
+	    }
+	   break;
+	  
+	case RELOCATE_ON_FACE:
+	  
+	  getRelocateData(stateData.rank, &stateData.active, &stateData.previousRankFailures);
+	  break;
+	case PREPARE_TO_MOVE:
+    case OBSTACLE_AVOIDANCE:
+	case CHANGE_FACE:
+	  
+	  getPrepareMove(stateData.rank, &stateRobotRankMinus1, &stateRobotRankPlus1, &stateData.previousRankFailures, &stateData.isRobotInCorridor);
+	  break;
+	case INTERPUSH: 
+	  //if (stateData.isRobotInCorridor)
+	    getInterPush(stateData.rank, stateData.active, stateData.currentFace, INTERPUSH, &stateOfActive, &membersInWait, &stateData.previousRankFailures, &isAnchorOn, &isRobotInCorridor);
+	  //else
+	    //getInterPush(stateData.rank, INTERPUSH, RELOCATE_ON_FACE, &existsRobotInOtherFace, &membersInWait, &stateData.previousRankFailures);
+	  
+	  break;
+	case TEST_PUSH_BOX:
+	case PUSH_BOX:
+	  getPushData(stateData.rank, RELOCATE_ON_FACE, &existsRobotInOtherFace, &isAnchorOn, &stateData.previousRankFailures);
+	  break;
+	
+	case WAIT_TEST:
+	case WAIT:
+	  getWaitData(stateData.rank, stateData.active, stateData.currentFace, &stateData.Xdistance, &stateData.Ydistance, WAIT, WAIT_TEST, INTERPUSH, &membersInWait,  &stateData.previousRankFailures);
+	  break;
+        default:
+	    break;
+	  
+    }
+    
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    debugPrint(*globalState, ldmap);
+
+    
+    switch (*globalState) 
+    {
+       case INIT:  
+            stateData.rank = 0;
+            externalSensor.code = code;
+            if (code > 0)
+            {
+		  stateData.localState = INIT;
+ 		 *globalState = SCANNING;
+#ifdef __INTIAL_SETTING__
+  		Serial.println("Set Debug params");
+  		debugMode(globalState);
+ #endif
+            }
+             stateData.members |= membersLocal;
+            break;
+        case SCANNING:
+	      
+            stateData.members |= membersLocal;
+// 	    Serial.print("Members ");
+// 	    Serial.println(membersLocal);
+	    if (scanningCodeEndRound(ldmap, &stateData.localState, clock) == COMPLETED_TIOA) {
+		  stateData.localState = INIT;
+		  *globalState = BROADCAST;
+	    }
+           break;
+        case BROADCAST:
+	    membersLocal =  getBroadcastData(&rank, &maxRank, &membersWithRank, &stateOfActive,  (uint8_t)BROADCAST, &membersInBroadcast, PREPARE_TO_MOVE);
+            stateData.members |= membersLocal;
+// 	    Serial.println("Max Rank ");
+//             Serial.println(maxRank);
+            if (maxRank > stateData.rank)
+            {
+                stateData.rank = maxRank + 1;
+                *globalState = APPROACHING;
+                stateData.localState = INIT;
+//                 stateData.active++;
+            }
+            else
+            {
+
+                if (membersInBroadcast == stateData.members)
+                {
+                    stateData.rank = rank;
+                }
+                if(stateData.members == membersWithRank)
+                {
+                    stateData.active++;
+                    *globalState = APPROACHING;
+                    stateData.localState = INIT;
+                }
+            }
+            break;
+	  
+        case APPROACHING:
+          if (approachingStateMachineEndRound(ldmap, &stateData.localState, clock) == COMPLETED_TIOA) {
+                stateData.localState = RESET_STATE;
+                *globalState = PREPARE_TO_MOVE;
+		stateData.faceTraverse = stateData.isRobotInCorridor ?  activeInFace + 1 :  3;
+            }
+	  
+	  break;
+        
+    case PREPARE_TO_MOVE:
+	    if (changeFaceEndRound(ldmap, &stateData.localState, clock) == COMPLETED_TIOA) {  
+	      stateData.localState = INIT;
+	      if (stateData.isRobotInCorridor)
+            *globalState = WAIT;
+              else
+            *globalState = WAIT_TEST;
+	      stateData.errorMovements  = 0;
+	  }
+	   break;
+        
+	case RELOCATE_ON_FACE:
+	    if (relocateOnFaceEndRound(ldmap, &stateData.localState, clock, stateRobotRankMinus1) == COMPLETED_TIOA) {
+            stateData.localState = INIT;
+            stateData.errorMovements  = 0;
+            if (stateData.isRobotInCorridor)
+              *globalState = WAIT;
+            else
+              *globalState = WAIT_TEST;
+	    }
+        break;
+	    
+    case OBSTACLE_AVOIDANCE:
+	case CHANGE_FACE:
+//         if (!areBothSensorsInBounds() && stateData.localState == INIT)
+//         {
+            
+            
+//         }
+// 	else
+//         {
+            if (stateData.localState == INIT)
+            {
+//                 Serial.print(stateRobotRankMinus1);
+//                 Serial.print("CHANGEFACE face = ");
+//                 Serial.println(stateData.faceTraverse);
+                stateData.localState = RESET_STATE;
+                if (stateData.active > 1)
+                {
+        // 		    if (activeInFace > 0 && (stateData.rank < stateData.active && stateRobotRankMinus1  != WAIT))
+                    if (stateData.faceTraverse > 0 && (stateData.rank > 1 && stateRobotRankMinus1  != WAIT))
+                    {
+//                     Serial.println("CF first if true");
+                    stateData.localState = INIT;
+                    }
+                    if (stateData.faceTraverse < 0 && (stateData.rank < stateData.active && stateRobotRankPlus1 != WAIT))
+                    {
+//                     Serial.println("CF 2nd if true");
+                    stateData.localState = INIT; 
+                    }
+                }
+            }
+
+            if (changeFaceEndRound(ldmap, &stateData.localState, clock ) == COMPLETED_TIOA) 
+            {
+                stateData.localState = INIT;
+                *globalState = WAIT;
+            }
+//         }
+	    break;
+      case WAIT_TEST: 
+	  if (membersInWait == ((1 << stateData.active) - 1))
+	  {
+	      
+	      stateData.errorMovements = 0; 
+	      *globalState = TEST_PUSH_BOX;
+	      stateData.distanceToMove = TEST_DISTANCE;
+	      setDistanceToTraverse(stateData.distanceToMove);
+	  }
+        break;
+     case TEST_PUSH_BOX:
+	    stateData.errorMovements += errCode;	 
+	    numberOfTries++;
+	    *globalState = testPushBoxEndRound(ldmap);
+	    break;
+      case INTERPUSH: 
+	  if (!stateData.isRobotInCorridor && isRobotInCorridor)
+	  {
+	      stateData.distanceToMove = stateData.Xdistance/2;
+	      setDistanceToTraverse(abs(stateData.distanceToMove));
+	      stateData.errorMovements = 0;
+	      stateData.isRobotInCorridor = true;
+	  }
+	  if (membersInWait == ((1 << stateData.active) - 1) && getOperationMode() == COOPERATIVE)
+	  {
+	      if (stateData.isRobotInCorridor)
+		  *globalState = PUSH_BOX;
+	      else
+		  *globalState = TEST_PUSH_BOX;
+	  }
+	  else if (stateData.rank > 1)
+	  {      
+	      if (stateOfActive == CHANGE_FACE)
+	      {
+		stateData.localState = INIT;
+		*globalState = CHANGE_FACE;
+		setTraversal(isAnchorOn);
+		stateData.isRobotInCorridor  = true;
+	     }
+	      else if (stateOfActive == OBSTACLE_AVOIDANCE)
+	      {
+              //setXYDistance(ldmap);
+		stateData.localState = INIT;
+		if (stateData.currentFace == 1)
+		  stateData.faceTraverse =  -2;
+		else if (stateData.currentFace == 3)
+		  stateData.faceTraverse =  2;
+		*globalState = OBSTACLE_AVOIDANCE;
+	      }
+	      else if (stateOfActive == RELOCATE_ON_FACE)
+	      {
+              stateData.active++;
+              stateData.localState = INIT;
+              *globalState = RELOCATE_ON_FACE;
+	      }
+	      else if (stateOfActive == END)
+	      {
+		      *globalState = END;
+	      }
+		      
+	  }
+	  break;
+      case WAIT:
+        
+	  if (membersInWait == ((1 << stateData.active) - 1))
+	  {
+	      stateData.errorMovements = 0;
+	      *globalState = PUSH_BOX;
+	      stateData.localState = INIT;
+	      if (stateData.currentFace == 0)
+		stateData.distanceToMove = LENGTH;
+	      else if (stateData.currentFace == 2 && stateData.rank == 1)
+	      {
+		if (stateData.YDone)
+		  stateData.distanceToMove = stateData.Xdistance;
+		else
+		  stateData.distanceToMove = stateData.Xdistance / 2;
+	      }
+	      else if (stateData.rank == 1)
+		stateData.distanceToMove = abs(stateData.Ydistance);
+	      if (stateData.rank > 1)
+		stateData.distanceToMove = MAX_DISTANCE_X;
+	      
+	      
+	      setDistanceToTraverse(stateData.distanceToMove);
+	  }
+	  break;
+      
+      case PUSH_BOX:
+        if (errCode == 0)
+            stateData.errorMovements = 0;
+ 	 stateData.errorMovements += errCode;	 
+  	 *globalState = pushBoxEndRound(ldmap, existsRobotInOtherFace, isAnchorOn);
+
+	  break;
+      case STABILIZE:
+	if (distanceCompleted() || (stateData.direction == HORIZONTAL_LEFT && externalSensor.dist_2 <= stateData.distanceBetweenRobots) || 
+ 		    (stateData.direction == HORIZONTAL_RIGHT  && externalSensor.dist_3 <= stateData.distanceBetweenRobots))
+        {
+	      if (stateData.isRobotInCorridor)
+		*globalState = WAIT;
+	      else
+		*globalState = WAIT_TEST;
+	  }
+	break;
+      case END:
+	  break;
+        
+    }
+    //Failure recovery
+    if (stateData.rank > 1 && stateData.previousRankFailures > 3)
+    {
+//         Serial.print("Failures ");
+//         Serial.println(stateData.previousRankFailures);
+        stateData.rank--; 
+        switch (*globalState)
+        {
+          case WAIT:
+          case WAIT_TEST:
+	  case INTERPUSH:
+          case PUSH_BOX:
+
+	      
+// 	      if (stateData.distanceBetweenRobots > 18)
+// 		setDistanceToTraverse(stateData.distanceBetweenRobots - 9);
+// 	      else
+		setDistanceToTraverse(stateData.distanceBetweenRobots*0.85);
+	      
+// 	      Serial.print(stateData.distanceBetweenRobots);
+// 	      Serial.println(" Moving");
+	      *globalState = STABILIZE;
+	      stateData.localState = INIT;
+	      stateData.direction = HORIZONTAL_RIGHT;
+	      break;
+
+          case PREPARE_TO_MOVE:    
+            case OBSTACLE_AVOIDANCE:
+          case CHANGE_FACE:
+              if (stateData.localState == CENTER)
+              {
+                *globalState = RELOCATE_ON_FACE;
+                stateData.localState = INIT;
+                stateData.direction = HORIZONTAL_RIGHT;
+
+              }
+              break;
+        }
+    }
+    xSemaphoreGive(mutex);
+    
+    return 0;
+}
+
+#endif

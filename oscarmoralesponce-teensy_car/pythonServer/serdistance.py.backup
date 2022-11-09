@@ -1,0 +1,76 @@
+import threading
+import time
+import serial
+from struct import *
+import array
+import sys
+import signal
+
+#from shareobjects import ShareObjects 
+#from sensors import Sensors
+#from codereader import CodeReader
+#from listener import Listener
+
+
+
+#class DistanceSensor(threading.Thread):
+class DistanceSensor(threading.Thread):
+
+
+  def __init__(self, rate, shareObjects):
+    threading.Thread.__init__(self)
+    self.serial = None
+    self.rate = rate
+    self.shareObjects = shareObjects
+    self.porti = 0
+
+    
+  def connect(self) :   
+    try:
+       self.serial = serial.Serial(port='/dev/ttyUSB{0}'.format(self.porti), baudrate=115200, timeout=0)
+            
+    except:
+       self.porti = (self.porti + 1) % 4
+       pass
+      
+  def readSerial(self):
+    
+      readLines = False
+      line = ""
+      try:
+        data = self.serial.readline()
+        
+        if len(line) > 0:
+	  line = line.data
+          print(line)
+          if "end" in line:
+	    
+          #s = line.split(",")  
+          #if len(s) == 4 and s[0] == "BE" and s[3] == "END":
+       # readLines = True
+      except:
+        #print("Error in reading")
+        self.connect()
+      #if readLines:
+       # for c in lines:
+	#    print(c)
+         #   s = c.split(",")   
+          #  if len(s) == 4 and s[0] == "BE" and s[3] == "END":
+           #     print(s[1], s[2])    
+            
+
+            
+      
+
+
+  def run(self) :
+    while True:
+      time.sleep(self.rate)
+      self.readSerial()
+
+        
+distanceSensor = DistanceSensor(0, 0);
+#distanceSensor.start()     
+while True:
+    #time.sleep(self.rate)
+    distanceSensor.readSerial()

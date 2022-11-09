@@ -1,0 +1,310 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+#include "config.h"
+
+#include "robot.h"
+#include "autopilot.h"
+
+#define SIZE_OF_QUEUE 3
+#define SIZE_OF_QUEUE 3
+
+
+
+// This goes in vm Mahine
+extern bool blocking;
+TaskHandle_t ldmHandle = NULL;
+
+extern uint8_t systemReady;
+
+
+LDMap ldmap; 
+uint32_t myRound;
+uint32_t totalInstructionMilli;
+Control_Data controlData;
+
+
+bool inAction;
+
+uint8_t localState;
+uint8_t cooperativeState;
+uint8_t operationMode;
+uint8_t membersInProgress;
+uint8_t membersInSync;
+uint8_t maxRoundInVoting;
+int8_t roundsInVoting;
+uint32_t clock;
+uint8_t propose;
+bool  firstTime = true;
+
+// RobotInstructionState instructionTop;
+// QueueHandle_t stackInstructionState;
+
+static QueueHandle_t stateQueue;
+static QueueHandle_t rxQueue;
+
+static void autopilotTask(void* args);
+static void ldmTask(void* args);
+
+bool ledTest = false;
+
+uint32_t geClock() 
+{
+  return clock;
+}
+
+uint8_t  getOperationMode()
+{
+    return operationMode;
+}
+uint8_t getCooperativeState()
+{
+    return cooperativeState;
+}
+
+uint8_t getMembersInProgress()
+{
+    return membersInProgress;
+}
+
+uint8_t getMembersInSync()
+{
+    return membersInSync;
+}
+
+uint8_t registered;
+
+void autopilotInit()
+{
+    myRound = 1;
+    localState = READY;
+    cooperativeState = IN_PROGRESS;
+    operationMode = AUTONOMOUS;
+    
+    controlData.leaderId = getId();
+    controlData.members = 1 << (getId() -1);
+    controlData.state = 0;    
+    controlData.time = 0;
+
+    roundsInVoting = 0;
+    membersInProgress = 0; 
+    membersInSync = 0;
+    clock = 0;
+    
+    inAction = false;
+    blocking = false;
+    firstTime = true;
+    maxRoundInVoting = 3;
+//     stackInstructionState = xQueueCreate(sizeof(RobotInstructionState),  SIZE_OF_QUEUE);
+           
+     xTaskCreate(autopilotTask, "autopilot", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+     xTaskCreate(ldmTask, "LDM", configMINIMAL_STACK_SIZE, NULL, 3, &ldmHandle);
+     
+     stateQueue  = xQueueCreate(1, sizeof(LDMap));
+     rxQueue = xQueueCreate(1, sizeof(LDMap));
+     
+     registered = registerSubscriber(NRF_DATA, ldmHandle, rxQueue);
+     registerSubscriber(STATE_DATA, ldmHandle, stateQueue);
+}
+
+bool autopilotTest()
+{
+//     if (stackInstructionState != NULL)
+	return true;
+//     return false;
+}
+
+void setInstruction(UARTCommand *command)
+{
+     RobotInstructionState instructionS;
+     instructionS.maxMilliseconds = command->maxTime;
+     instructionS.currentInstruction = command->dir;
+     instructionS.speed = command->speed;
+     instructionS.distance = command->distance;
+     instructionS.orientation = command->orientation;
+     robotSetInstruction(&instructionS);	     
+}
+
+
+
+
+void cooperativeTIOA(uint8_t lstate)
+{
+    switch (cooperativeState)
+    {
+      case IN_PROGRESS:
+	 if (robotGetStatus()) 
+	 {
+	    digitalWrite(13, LOW);
+#if NRF_TASK == 1
+	    cooperativeState = SYNC;
+	    membersInSync = 1 << (getId() -1);
+	    stopSending();
+#else	  
+	    blocking = false;
+	    newRound();
+#endif
+	  }
+	  break;
+        case VOTING:
+            if (roundsInVoting <= 0)
+            {	
+		digitalWrite(13, HIGH);
+		inAction = true;
+		blocking = false;
+		cooperativeState = IN_PROGRESS;
+		membersInSync = 0;
+		membersInProgress = 0;
+		newRound();
+	        startSending();
+		
+            }
+            roundsInVoting--;
+            break;
+    }
+}
+
+void autopilotTask(void* args)
+{		
+	portTickType lastWakeTime = xTaskGetTickCount();
+
+	while (!systemReady)
+	{
+	  vTaskDelayUntil(&lastWakeTime, M2T(10));
+	}
+	    
+	cooperativeState = IN_PROGRESS;
+        while (true) 
+	{
+ 	    clock++;
+	    vTaskDelayUntil(&lastWakeTime, M2T(200));
+	    cooperativeTIOA(localState);            
+      }
+}
+
+
+void ldmTask(void* args)
+{
+    uint32_t publisherId;
+    LDMap ldmapState;
+    
+    
+    while (true)
+    {
+	if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+	{
+	  switch (publisherId)
+	  {
+	    case NRF_DATA:
+	      if (xQueueReceive(rxQueue, &ldmapState, ( TickType_t ) 0 ) == pdTRUE)
+	      {		
+		 uint8_t mInP, mInSyn;
+		  if (ldmapState.id == getId())
+		  {
+		     controlData.members = ldmapState.members;
+		     controlData.leaderId = ldmapState.leaderId;
+		     membersInProgress = 1 << (getId() -1);
+		     
+		     
+//   		     mInP  = controlData.members & membersInProgress;
+//   		     mInSyn  = controlData.members & membersInSync;
+ 		     mInP = membersInProgress;
+  		     mInSyn = membersInSync;
+		     if (membersInProgress == controlData.members &&  cooperativeState == SYNC && controlData.members == mInSyn)
+		     {
+		        Serial.print(controlData.members);
+		        Serial.print(" , ");
+			Serial.print(mInSyn);
+		        Serial.print(" VOTING ");
+			Serial.println(clock);
+			cooperativeState = VOTING;			
+		     }
+		  }
+		  else
+		  { 
+		      uint32_t c = ldmapState.clock; 
+// 		      c += (int)(EXPECTEDLATENCY >> 1); //  + (SYNCHRONIZATIONROUND >> 1);
+		      float dif = fabs((float)c - (float)clock);
+		     // Syncrhonize clocks if there is a leader
+		      if (controlData.leaderId == ldmapState.id && dif  > 50.0)
+		      {
+			clock = c;
+		      }  
+		      
+  		      ldmapState.id = ldmapState.id -1;
+		      switch (cooperativeState)
+		      {
+			case IN_PROGRESS:
+			  switch (ldmapState.tioaState)
+			  {
+			      case IN_PROGRESS:
+				membersInProgress |= (1 << ldmapState.id);
+				break;
+			      case SYNC:
+				membersInProgress |= (1 << ldmapState.id);
+				membersInSync |= (1 << ldmapState.id);
+				break;
+			      case VOTING:
+				break;
+			  }		
+			  break;
+			case SYNC:
+			  switch (ldmapState.tioaState)
+			  {
+			      case IN_PROGRESS:
+				membersInProgress |= (1 << ldmapState.id);
+				break;
+			      case SYNC:  
+				membersInSync |= (1 << ldmapState.id);
+// 				mInP  = controlData.members & membersInProgress;
+// 				mInSyn  = controlData.members & membersInSync;
+				mInSyn = membersInSync;
+				Serial.print( controlData.members);
+				Serial.print(" Votes ");
+				Serial.println(membersInSync);
+				if (controlData.members == mInSyn)
+				{
+				  membersInSync = 0;
+				  Serial.print(clock);
+				  Serial.println(" SYNC VOTING");
+				  roundsInVoting = maxRoundInVoting;
+				  cooperativeState = VOTING;
+				}
+				break;
+			      case VOTING:	
+// 				membersInSync |= controlData.members;
+				cooperativeState = VOTING;
+				Serial.print(clock);
+				Serial.println(" VOTING VOTING");
+				break;
+			  }
+			  break;
+			case VOTING:		
+			  switch (ldmapState.tioaState)
+			  {
+			      case IN_PROGRESS:
+// 				membersInProgress |= (1 << ldmapState.id);
+				break;
+			      case SYNC:
+			      case VOTING:	
+				 break;
+			  }
+			break;
+		      }   
+		      insertLDMAP(0, &ldmapState);
+		  }	
+	      }
+	      break;
+	    case STATE_DATA:
+ 	      if (xQueueReceive(stateQueue, &ldmap, ( TickType_t ) 0 ) == pdTRUE)
+	      {
+	         ldmap.id = ldmap.id -1;
+		 insertLDMAP(0, &ldmap);
+	      }
+	      break;
+	  
+	      break;
+	  }
+	}
+   }
+}

@@ -1,0 +1,339 @@
+4 No sync 0
+4 Start Voting 4
+++++1 CurrState 3 RemoteState 1
+26650======= 266
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+5 No sync 4
+1 Set Direction 0,0.00,0
+Completed
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 3
+4 Start Voting 4
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 1
+28800======= 288
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 1 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 3
+31200======= 312
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 3
+33200======= 332
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 2
+++++1 CurrState 3 RemoteState 2
+37800======= 378
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 2
+39400======= 394
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 3
+Completed
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 3
+4 Start Voting 4
+++++1 CurrState 3 RemoteState 3
+++++1 CurrState 3 RemoteState 3
+40900======= 409
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+Completed
+++++1 CurrState 2 RemoteState 3
+4 Start Voting 4
+++++1 CurrState 3 RemoteState 3
+++++1 CurrState 3 RemoteState 3
+++++1 CurrState 3 RemoteState 3
+42300======= 423
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 3
+Completed
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 3
+4 Start Voting 4
+++++1 CurrState 3 RemoteState 2
+++++1 CurrState 3 RemoteState 2
+43900======= 439
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 3
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 1
+++++1 CurrState 3 RemoteState 2
+45900======= 459
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 1 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 3 RemoteState 3
+++++1 CurrState 3 RemoteState 1
+49100======= 491
+1 Set Direction 0,0.00,0
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 1
+Completed
+++++1 CurrState 1 RemoteState 1
+5 No sync 4
+++++1 CurrState 2 RemoteState 2
+5 Start Voting 5
+++++1 CurrState 2 RemoteState 1
+++++1 CurrState 3 RemoteState 2
+50600======= 506
+1 Set Direction 0,0.00,0
+++++1 CurrState 3 RemoteState 2
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 2
+++++1 CurrState 1 RemoteState 1
+++++1 CurrState 1 RemoteState 2
+1 Set Direction 0,0.00,0
+Completed
+22000======= 110
+1 Set Direction 0,0.00,0

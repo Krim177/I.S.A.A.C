@@ -1,0 +1,70 @@
+import threading
+import serial
+import re
+import time
+
+from shareobjects import ShareObjects 
+
+
+class DistanceSensor(threading.Thread):
+  def __init__(self, rate, shareObjects):
+    threading.Thread.__init__(self)
+    self.serial = None
+    self.rate = rate
+    self.shareObjects = shareObjects
+    self.porti = 0
+    self.line = ""
+    #self.endTime = 0
+    #self.startTime = 0
+
+    
+  def connect(self) :   
+    try:
+       self.serial = serial.Serial(port='/dev/ttyUSB{0}'.format(self.porti), baudrate=115200, timeout=0)
+            
+    except:
+       self.porti = (self.porti + 1) % 4
+       pass
+      
+  def readSerial(self):
+      try:
+        data = self.serial.readline()
+        data = re.sub(r"\s+", "", data.decode('utf8'))
+        
+        if len(data) > 0:
+          self.line = self.line + data
+          if "END" in self.line:
+            #self.startTime = time.time()
+            #print("TimeBetween ", self.startTime-self.endTime); 
+            #print(self.line)
+            s = self.line.split(",")   
+            if len(s) >= 2 and s[0] == "BE" and s[len(s)-1] == "END":
+                self.shareObjects.lock.acquire()
+                for i in range(1, len(s)-1):
+                   self.shareObjects.sensorDistance[i-1] = int(s[i])
+                   print("Sensor ", i-1, self.shareObjects.sensorDistance[i-1])    
+                   
+                self.shareObjects.lock.release()
+            self.line = ""
+            #self.endTime = time.time()
+            #print("Processing Time ", self.endTime-self.startTime); 
+      except:
+        #print("Error in reading")
+        self.connect()
+            
+      
+
+
+  def run(self) :
+    self.connect()
+    while True:
+      time.sleep(self.rate)
+      self.readSerial()
+
+        
+#distanceSensor = DistanceSensor(0, 0);
+#distanceSensor.start()     
+#while True:
+    #time.sleep(self.rate)
+    #distanceSensor.readSerial()
+

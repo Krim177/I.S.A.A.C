@@ -1,0 +1,89 @@
+import threading
+import time
+import serial
+import serial.tools.list_ports as port_list
+
+from shareobjects import ShareObjects 
+from listener import Listener
+from sensors import Sensors
+from codereader import CodeReader
+
+
+
+class SerialCar(threading.Thread):
+
+  def __init__(self, rate, shareObjects):
+    threading.Thread.__init__(self)
+    self.serial = None
+    self.rate = rate
+    self.shareObjects = shareObjects
+    
+  def payload(self, code, distance, offset, sensor1, sensor2, sensor3):
+    ch = 0
+    length = 12
+    pay = pack('hHhHHH', code, distance, offset, sensor1, sensor2, sensor3)
+    a = array.array('b', pay).tobytes()
+    for i in range(0, 12):
+      ch = (ch + a[i]) % 256
+
+    pay = pack('BBB', 67, 79, 12) + pay + pack('B', ch)
+    return pay
+    
+  def connect(self) :   
+    ports = list(port_list.comports())
+    for p in ports:
+      try:
+        self.serial = serial.Serial(port=p[0], baudrate=115200)
+
+      except:
+        print("Not connected")
+      
+  def readSerial(self):
+    
+      try:
+        lines = self.serial.read_all().splitlines()	
+        for c in lines:
+           print(c)
+           if len(c) == 6:
+              (m1, m2, l, qr, command, ch) = unpack('BBBBBB', c) 
+           if m1== 67 and m2 == 79 and (qr + command) == ch:  # testing if the message is correct
+              self.shareObjects.lock.acquire(True)
+              self.shareObjects.code = qr
+              self.shareObjects.lock.release()
+           else:
+              print(c.decode("utf-8"))
+      except:
+        print("Trying to connect read serial")
+        self.connect()
+      
+      
+
+  def writeData(self):
+    
+      try:
+        #self.shareObjects.lock.acquire(True) 
+        print("Sending to serial ", self.shareObjects.code, self.shareObjects.sensorDistance1)
+        pay = self.payload(self.shareObjects.code, int(self.shareObjects.distance), int(self.shareObjects.offset), self.shareObjects.sensorDistance1, self.shareObjects.sensorDistance2, self.shareObjects.sensorDistance3)
+        #self.shareObjects.lock.release()
+        self.serial.write(pay)  # write payload to serial port      
+      except:
+        print("Trying to connect writedata")
+        self.connect()
+
+  def run(self) :
+    while True:
+      time.sleep(self.rate)
+      self.readSerial()
+      #self.writeData()
+
+
+shareObject = ShareObjects()
+#sensors = Sensors(shareObject)
+#listener = Listener(shareObject)
+#codeReader = CodeReader(0.5, shareObject)
+serialCar = SerialCar(0.1, shareObject)
+#sensors.start()
+#listener.start()
+#codeReader.start()
+serialCar.start()      
+

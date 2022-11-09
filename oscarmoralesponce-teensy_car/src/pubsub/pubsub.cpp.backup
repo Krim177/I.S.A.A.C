@@ -1,0 +1,156 @@
+#include <string.h>
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "datastructures.h"
+
+#include "pubsub.h"
+#include "pq.h"
+#include "ll.h"
+
+
+
+
+Publisher publishers[MAX_PUB];
+Subscriber subscribers[MAX_SUB];
+int publisherCount = 0;
+int subscriberCount = 0;
+
+TaskHandle_t priorityBrokerTask = NULL;
+TaskHandle_t notificationBrokerTask = NULL;
+
+// static void psPriorityBrokerTask(void* param);
+static void psNotificationBrokerTask(void* param);
+
+void pubsubInit() {
+//     xTaskCreate(psPriorityBrokerTask, "SyncBroker",
+//               configMINIMAL_STACK_SIZE, NULL, 4, &priorityBrokerTask);
+    xTaskCreate(psNotificationBrokerTask, "AsyncBroker",
+            configMINIMAL_STACK_SIZE, NULL, 4, &notificationBrokerTask);
+}
+
+/**
+ * Adds a publisher to the publisher list and adds it to the priority queue.
+ * @param int bitMask The bitmask of the publisher to be used for the publisher index.
+ * @param uint32_t rate The rate in milliseconds that the publisher will run.
+ * @param uint32_t data The initial value of the data to publish.
+ * @param void* job A pointer to the function that this publisher will perform.
+ */
+uint8_t registerPublisher(uint8_t id,   uint8_t len, QueueHandle_t queueHandler)
+{
+    if (publisherCount >= MAX_PUB || id == 0) {
+        return 0;
+    }
+    publishers[publisherCount].queueHandler = queueHandler;
+    publishers[publisherCount].id = id;
+    publishers[publisherCount].len = len;
+
+
+    publisherCount++;
+    return publisherCount-1;
+}
+
+uint8_t registerPublisherPull(uint8_t id, uint8_t len,  QueueHandle_t queueHandler, uint32_t rate, Job job)
+{
+    if (publisherCount >= MAX_PUB || id == 0) {
+        return 0;
+    }
+
+    uint32_t tickCount = xTaskGetTickCount();
+    int nextW = tickCount + rate;
+    insert(publisherCount, nextW, job);
+    return registerPublisher(id, len, queueHandler);
+}
+
+bool pubsubTest() {
+    return true;
+}
+
+/**
+ * This will act as the broker thread. Publishers will register here and be
+ * executed on this thread in the order they are held in the priority queue.
+ * This task will notify other Subscriber tasks that have registered here as
+ * well whenever the data they have subscribed to becomes available.
+ */
+void psPriorityBrokerTask(void* param) {
+//     Ticket* ticket;
+//      uint32_t lastWakeTime = xTaskGetTickCount();
+     while (true) {
+        /*    if (getSize() > 0) {
+             // extract the head of the priority queue and the corresponding Publisher
+             Ticket* ticket = extractMin();
+             while (ticket->nextW < xTaskGetTickCount())
+             {
+                publisher->job();
+                ticket->nextW = lastWakeTime + ticket->rate;
+                insert(ticket->rate, xTaskGetTickCount() + publisher->rate, publisher->job);
+                ticket = extractMin();
+             }
+              vTaskDelayUntil(&lastWakeTime, ticket->priority - xTaskGetTickCount());
+             }
+          } else {*/
+             vTaskDelay(100);
+        // }
+     }
+}
+
+static void psNotificationBrokerTask(void* param) {
+    uint32_t publisherId;
+    unsigned char buffer[124];
+
+    while (true) {
+        if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE) {
+            Publisher* p = &publishers[publisherId];
+
+            xQueueReceive(p->queueHandler, &buffer[0], ( TickType_t ) 0);
+
+            Item* item = p->ll_sub;
+            while (item != NULL) {
+                Subscriber* s = &subscribers[item->data];
+
+		if (publisherId == 8)
+		{
+		  
+		}
+                xQueueSend(s->queueHandler, &buffer[0], ( TickType_t ) 0);
+		if (s->taskHandle != NULL)
+		  xTaskNotify(s->taskHandle, p->id, eSetBits);
+                item = item->next;
+            }
+        }
+    }
+}
+
+
+
+/**
+ * Adds a subscriber to the subscriber list.
+ * @param 
+ * @return
+ */
+bool registerSubscriber(uint32_t publisherId, TaskHandle_t taskHandle, QueueHandle_t queueHandler)
+{
+    if (subscriberCount >= MAX_SUB) return false;
+
+    subscribers[subscriberCount].queueHandler = queueHandler;
+    subscribers[subscriberCount].taskHandle = taskHandle;
+
+    subscriberCount++;
+    // make assignments
+    uint8_t i;
+    for (i=0; i<publisherCount; i++)
+    {
+        if (publishers[i].id == publisherId)
+        {
+        
+            publishers[i].ll_sub = addItem(publishers[i].ll_sub, subscriberCount-1);
+            return true;
+        }
+    }
+    return false;
+}
+
+void publish(int publisherIndex) {
+    
+    if (notificationBrokerTask != NULL) xTaskNotify(notificationBrokerTask, publisherIndex, eSetBits);
+}

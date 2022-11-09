@@ -1,0 +1,338 @@
+/**
+* NRF Communication. 
+*
+* @author  Oscar Morales-Ponce
+* @version 0.1
+* @since   02-26-2019 
+* 
+* It registers as a publisher. When it receives a message it publishes
+* It also registers as a subscriber to the LDMAP so when new data is available it 
+* can transmit
+* Publisher:
+* 	NRF_DATA: 
+* 		It publish the data when it receives a message
+*/
+
+#include <FreeRTOS.h>
+#include <task.h>
+#include <semphr.h>
+#include <queue.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+#include "pubsub.h"
+#include "datastructures.h"
+#include "uartCommand.h"
+#include "nrf51822.h"
+#include "config.h"
+
+
+#define NRF_INT 3
+
+static uint8_t nrfId = 0;
+// static uint8_t nrfControlData = 0;	
+
+uint8_t sending = true;
+extern uint8_t systemReady;
+
+static xQueueHandle rxQueue;
+// static xQueueHandle rxControlData;
+
+
+static MessageData  extraMessageData;
+
+TaskHandle_t nrfSendHandle = NULL;
+
+static bool bInit = false;
+static void nrfSendTask(void* args);
+static void nrfRecvTask(void* args);
+
+
+typedef enum
+{
+  waitForFirstStart,
+  waitForSecondStart,
+  waitForType,
+  waitForLength,
+  waitForData,
+  waitForChksum,
+} SyslinkRxState;
+
+
+
+/* 
+* nrfSendConf: Sends th configuration parameters to the NRF
+* @param type: the message  (RADIO_CHANNEL, RADIO_DATARATE, RADIO_ADHOC)
+* @param param: The parameter of the message
+*/
+void nrfSendConf(uint8_t type, uint8_t param)
+{
+    Serial1.write(UART_FIRST_BYTE);
+    Serial1.write(UART_SECOND_BYTE);
+    Serial1.write(type);
+    Serial1.write(1);
+    Serial1.write(param);
+    Serial1.write(param);  // checksum
+    Serial1.write("\n");
+}
+
+/* 
+* nrfSendChannel: Send the channel that the NRF will use
+* @param channel: a byte representing the channel
+*/
+void nrfSetChannel(uint8_t channel)
+{
+    nrfSendConf(RADIO_CHANNEL, channel);
+}
+
+/* 
+* nrfSetDatarate: Send the datarate that the NRF will use
+* @param datarate: 
+*/
+void nrfSetDatarate(uint8_t datarate)
+{    
+    nrfSendConf(RADIO_DATARATE, datarate);
+}
+
+/* 
+* nrfSetADHOC: change the mode to adhoc where the nrb will use a TDMA
+*/
+void nrfSetADHOC()
+{    
+    nrfSendConf(RADIO_ADHOC, getId());
+}
+
+/* 
+* nrfSetADHOC: set the address of the NRF
+* @param address 
+*/
+void nrfSetAddress(uint64_t address)
+{
+    uint8_t i;
+    uint8_t *p = (uint8_t *)&address;
+    Serial1.write(UART_FIRST_BYTE);
+    Serial1.write(UART_SECOND_BYTE);
+    Serial1.write(RADIO_ADDRESS);
+    Serial1.write(RADIO_ADDRESS);
+    
+    uint8_t ch = 0;
+    for (i=0; i<5; i++, p++)
+    {
+	ch = (ch + *p) % 256;
+	Serial1.write(*p);
+    }
+    Serial1.write(ch);
+}
+
+
+
+/* 
+* nrfInit: Create a queue of LDMAP and register as the NRF_DATA publisher. 
+* Two task are created, the receive that receives the message from the NRF and the sender to send regularly messages
+*/
+void nrfInit()
+{
+    Serial1.begin(460800);
+    Serial1.attachCts(2);
+    
+    bInit = true;
+    memset(&extraMessageData, 0, sizeof(MessageData));
+    rxQueue = xQueueCreate(1, sizeof(LDMap));
+    
+    nrfId = registerPublisher(NRF_DATA, sizeof(LDMap), rxQueue);
+    xTaskCreate(nrfRecvTask, "nrfRec", configMINIMAL_STACK_SIZE, NULL, 3,  &nrfSendHandle);  
+    xTaskCreate(nrfSendTask, "nrfLDM", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+    bInit = true;
+}
+
+/* 
+* nrfTest: Returns bInit if the tasks have been initialized
+*/
+bool nrfTest()
+{
+    return bInit;
+}
+
+/* 
+* startSending: Sets the sending flag to true that forces to transmit its state every 50 milleseconds 
+*/
+void startSending()
+{
+    sending = true;
+}
+
+
+/* 
+* stopSending: Sets the sending flag to false that forces to stop transmitting
+*/
+void stopSending()
+{
+    sending = false;
+}
+
+void sendMessageData(MessageData *data)
+{
+    memcpy(&extraMessageData, data, sizeof(MessageData));
+}
+ 
+/* 
+* nrfSendTask: Task that transmit its state every 50 milleseconds 
+*/
+static void nrfSendTask(void* args)
+{
+    
+    portTickType lastWakeTime = xTaskGetTickCount();
+    CommonKnowledge commonKnowledge;
+
+     // wait until the system is ready
+     while (!systemReady)
+    {
+         vTaskDelayUntil(&lastWakeTime, 100 / portTICK_RATE_MS);
+    }
+    // Set the NRF in ADHOCMode
+    nrfSetADHOC();
+	  
+    while (true) {
+      
+      vTaskDelayUntil(&lastWakeTime, M2T(50));
+      LDMap *ldmap = getLDMP(getId());
+      if (sending) // && ldmap->id  == getId())
+      {  	
+	    commonKnowledge.position_x = ldmap->position_x;
+	    commonKnowledge.position_y = ldmap->position_y;
+	    commonKnowledge.speed = ldmap->speed;
+	    commonKnowledge.heading = ldmap->heading;
+      }
+      
+      commonKnowledge.clock = ldmap->clock;
+      commonKnowledge.operationMode = ldmap->operationMode;
+      commonKnowledge.tioaState = ldmap->tioaState;  
+      
+      commonKnowledge.instruction = ldmap->instruction;
+      commonKnowledge.propose = ldmap->propose;
+      commonKnowledge.membersInProgress = ldmap->membersInProgress;
+      commonKnowledge.membersInSync = ldmap->membersInSync;
+
+      memcpy(commonKnowledge.data,  &extraMessageData, sizeof(extraMessageData));
+	    
+      // Send the local dynamic map
+      uint8_t *data = (uint8_t *)&commonKnowledge;
+      Serial1.write(UART_FIRST_BYTE);
+      Serial1.write(UART_SECOND_BYTE);
+      Serial1.write(RADIO_CONTROL);
+      Serial1.write(sizeof(commonKnowledge));
+      uint8_t i;
+      uint8_t ch = 0;
+	  
+      
+      for (i=0; i<sizeof(commonKnowledge); i++)
+      {
+	Serial1.write(data[i]);
+	ch += (data[i]) % 256;
+      }
+      Serial1.write(ch);
+      Serial1.write("\n");
+     
+    }
+}
+
+
+
+/* 
+* nrfRecvTask: It receives the messages from the NRF. It is a state machine to verifty that the
+* message is correct
+*/
+static void nrfRecvTask(void *param)
+{
+  portTickType lastWakeTime = xTaskGetTickCount();
+  SyslinkRxState rxState = waitForFirstStart;
+  NRFPacket packet;
+  
+  packet.length = 0;
+
+  uint8_t c;
+  uint8_t dataIndex = 0;
+  uint8_t cksum = 0;
+  while(1)
+  {
+      vTaskDelayUntil(&lastWakeTime, M2T(1));
+      while (Serial1.available() > 0)
+      {
+          c = Serial1.read();
+	  switch(rxState)
+         {
+            case waitForFirstStart:
+             rxState = (c == UART_FIRST_BYTE) ? waitForSecondStart : waitForFirstStart;
+             break;
+            case waitForSecondStart:
+             rxState = (c == UART_SECOND_BYTE) ? waitForType : waitForFirstStart;
+             break;
+            case waitForType:
+              packet.type = c;
+             rxState = waitForLength;
+	     
+             break;
+            case waitForLength:
+              if (c < sizeof(EsbPacket))
+              {
+                packet.length = c;
+                dataIndex = 0;
+                rxState =  waitForData;
+  	             cksum = 0;
+              }
+              else
+             	  rxState = waitForFirstStart;
+              break;
+            case waitForData:
+		if (dataIndex < packet.length)
+		{
+ 		    packet.data[dataIndex++] = c;
+		    cksum += c;
+		}
+		
+		if (dataIndex >= packet.length)
+		{
+		    rxState = waitForChksum;
+		}
+              
+            break;
+          case waitForChksum:
+	      
+		if (cksum == c)
+		{
+		    CommonKnowledge *commonKnowledge = (CommonKnowledge *)packet.msg.data;
+		    LDMap ldmap;
+		    
+		    ldmap.id = packet.msg.id;
+		    if (ldmap.id > 0)
+		    {
+		      ldmap.clock = commonKnowledge->clock;
+		      ldmap.members = packet.msg.members;
+		      ldmap.leaderId = packet.msg.leaderId;
+		      ldmap.position_x = commonKnowledge->position_x;
+		      ldmap.position_y = commonKnowledge->position_y;
+		      ldmap.membersInProgress = commonKnowledge->membersInProgress;
+		      ldmap.membersInSync = commonKnowledge->membersInSync;
+		      ldmap.speed = commonKnowledge->speed;
+		      ldmap.heading = commonKnowledge->heading;
+		      
+ 		      ldmap.operationMode = commonKnowledge->operationMode;
+ 		      ldmap.tioaState = commonKnowledge->tioaState;
+ 		      ldmap.propose = commonKnowledge->propose;
+ 		      ldmap.instruction = commonKnowledge->instruction;
+		      ldmap.rssi = 0;
+		      memcpy(&ldmap.messageData, commonKnowledge->data, sizeof(MessageData));
+		      xQueueOverwrite(rxQueue, &ldmap);
+		      Serial.println();
+		      publish(nrfId);
+		      
+		    }
+		}
+		rxState = waitForFirstStart;
+            break;
+          default:
+            break;
+          }
+      }
+  }
+}

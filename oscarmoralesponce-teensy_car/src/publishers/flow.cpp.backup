@@ -1,0 +1,65 @@
+
+#include <FreeRTOS.h>
+#include <task.h>
+#include <semphr.h>
+#include "pubsub.h"
+#include "Bitcraze_PMW3901.h"
+#include "datastructures.h"
+#include "flow.h"
+
+
+Bitcraze_PMW3901 flow(10);
+
+static QueueHandle_t flowQueue;
+
+
+static uint8_t flowId = 0;
+static uint8_t bInit = 0;
+static void flowTask(void* args);
+
+void flowInit()
+{
+       bInit = flow.begin();
+    
+      if (bInit)
+      {
+         flowQueue  = xQueueCreate(1, sizeof(Flow_Data));
+         flowId = registerPublisher(FLOW_DATA, sizeof(Flow_Data),flowQueue);
+	 xTaskCreate(flowTask, "FLOW", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY + 3, NULL);
+         
+      }
+     
+}
+
+
+bool flowTest()
+{
+    return bInit;
+}
+
+void flowTask(void* args) 
+{
+    portTickType lastWakeTime = xTaskGetTickCount();
+    int16_t deltaX, deltaY = 0;
+    while (true) 
+    {
+      vTaskDelayUntil(&lastWakeTime, FLOW_SPEED / portTICK_RATE_MS);
+      vTaskDelayUntil(&lastWakeTime, 100 / portTICK_RATE_MS);
+      
+      flow.readMotionCount(&deltaX, &deltaY);
+
+      Flow_Data flow_sensor;
+      flow_sensor.deltax = deltaX;
+      flow_sensor.deltay = deltaY;
+       
+      if (flow_sensor.deltax > -256 && flow_sensor.deltax < 255 && flow_sensor.deltay > -256 && flow_sensor.deltay < 255 )
+      {
+//  	        Serial.print("Flow " );
+//          Serial.println(flow_sensor.deltax);
+
+//   	       Serial.print("Flow " );
+	  xQueueOverwrite(flowQueue, &flow_sensor);
+	  publish(flowId);
+      }
+   }
+}

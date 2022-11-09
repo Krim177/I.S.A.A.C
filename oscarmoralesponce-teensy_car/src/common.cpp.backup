@@ -1,0 +1,82 @@
+#include <datastructures.h>
+
+
+
+float deadband(float value, const float threshold)
+{
+    if (fabsf(value) < threshold)
+    {
+        value = 0;
+    }
+    else if (value > 0)
+    {
+        value -= threshold;
+    }
+    else if (value < 0)
+    {
+        value += threshold;
+    }
+    return value;
+}
+
+
+
+void buildQuaternion(Quaternion *q, float x, float y, float z, float angle)
+{
+    q->a = 0;
+    q->b = 0;
+    q->c = sin(angle/2.0f);
+    q->d = cos(angle/2.0f);
+    float32_t n = q->c*q->c + q->d*q->d;
+    float32_t x;
+    if (ARM_MATH_SUCCESS == arm_sqrt_f32(n, &x))
+    {
+      q->c /= x;
+      q->d /= x;
+    }
+}
+
+void conjugate(Quaternion *q1, Quaternion *res)
+{
+    res->a = -q1->a;
+    res->b = -q1->b;
+    res->c = -q1->c;
+    res->d =  q1->d;
+}
+
+void diff(Quaternion *q1, Quaternion *q2)
+{
+    Quaternion q3;
+    inverse(q1, q3);
+    multiplyQuaternion(q1, q3, q2);
+    
+}
+
+void inverse(Quaternion *q1, Quaternion *q2)
+{
+    conjugate(q1, q2);
+    float norm = 1/dot(q2,q2);
+    q2->a *= norm;
+    q2->b *= norm;
+    q2->c *= norm;
+    q2->d *= norm;
+}
+
+void multiplyQuaternion(Quaternion *q1, Quaternion *q2, Quaternion *res)
+{
+    res->a = q1->d * q2->a + q1->a * q2->d + q1->b * q2->c + q1->c * q2->b;
+    res->b = q1->d * q2->b + q1->b * q2->d + q1->c * q2->a + q1->a * q2->c;
+    res->c = q1->d * q2->c + q1->c * q2->d + q1->a * q2->b + q1->b * q2->a;
+    res->d = q1->d * q2->d + q1->a * q2->a + q1->b * q2->b + q1->c * q2->c;
+    
+}
+ 
+float dot(Quaternion *q1, Quaternion *q2)
+{
+    return q1->a*q2->a + q1->b*q2->b + q1->c*q2->c + q1->d*q2->d;
+}
+
+float getAngleFromQuaternion(Quaternion *q)
+{
+    return atan2(2.0f*(q->d*q->c + q->a*q->b), 1 - 2.0f*(q->b*q->b + q->c*q->c)); 
+}

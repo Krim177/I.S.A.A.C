@@ -1,0 +1,229 @@
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+#include "config.h"
+#include "robot.h"
+#include "autopilot.h"
+#include "pathPlanning.h"
+#include "state.h"
+
+
+static LDMap     ldmap;
+bool blocking = false;
+uint32_t clock = 0;
+	
+
+TaskHandle_t virtualMachineHandler;
+TaskHandle_t sensorHandler;
+
+static QueueHandle_t externalSensorQueue;
+static QueueHandle_t stateQueue;
+static QueueHandle_t attitudeQueue;
+static QueueHandle_t externalCommandQueue;
+
+static void virtualMachineTask(void* args);
+static void externalSensorTask(void* args);
+static void uartExternalCommandSend(void* args);
+
+extern uint8_t systemReady;
+
+enum { INIT, BROADCAST, ROTATELEFT, SHIFTLEFT, END};
+enum { RUNNING, HOLDING};
+enum {  HORIZONTALRIGHT = 20, HORIZONTALLEFT, APPROACHING, VERTICAL  };
+
+static uint8_t globalState = INIT;
+static uint8_t localState = INIT;
+
+int16_t xOrigin;
+
+uint8_t mpu_state = RUNNING;
+
+
+typedef struct _tExternalCommand
+{
+	uint8_t qrcode;
+	uint8_t armcommmand;
+} ExternalCommand;
+
+
+typedef struct _lShiftData {
+	int16_t distance;				// Distance traversed
+	bool success;
+} lShiftData;
+
+
+static UARTSensor uartSensor;
+static MessageData messageData;
+
+
+int16_t distanceSensor(int16_t distance) {
+	if (distance > 20) {
+		return 9999;							// If distance covered is greater than 20, return 9999 to simulate nothing infront of sensors
+	}
+	return 5;									// Else return arbitrary number to simulate box in front of sensors
+}
+
+
+void virtualMachineInit()
+{
+	xTaskCreate(virtualMachineTask, "VM", configMINIMAL_STACK_SIZE, NULL, 3, &virtualMachineHandler);
+	xTaskCreate(externalSensorTask, "ES", configMINIMAL_STACK_SIZE, NULL, 3, &sensorHandler);
+	externalSensorQueue = xQueueCreate(1, sizeof(UARTSensor));
+	stateQueue = xQueueCreate(1, sizeof(LDMap));
+	attitudeQueue = xQueueCreate(1, sizeof(Attitude_Data));
+		
+	registerSubscriber(UART_SENSOR, sensorHandler, externalSensorQueue);
+	registerSubscriber(ATTITUDE_DATA, sensorHandler, attitudeQueue);
+ 	registerSubscriber(STATE_DATA, sensorHandler, stateQueue);
+#if SENSORS == EXTERNAL_SENSOR
+	xTaskCreate(uartExternalCommandSend, "ECOMM", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+	externalCommandQueue = xQueueCreate(1, sizeof(ExternalCommand));
+#endif
+	globalState = INIT;
+}
+
+void sendTaskToRasp(uint8_t code, uint8_t task)
+{
+	ExternalCommand command;
+	command.qrcode = code;
+	command.armcommmand = task;
+
+	xQueueOverwrite(externalCommandQueue, &command);
+}
+
+static void uartExternalCommandSend(void *param)
+{
+	uint8_t *data;
+	uint8_t ch;
+	uint8_t i;
+	ExternalCommand command;
+
+	while (true)
+	{
+		xQueueReceive(externalCommandQueue, &command, portMAX_DELAY);
+		data = (uint8_t *)&command;
+		Serial.write(UART_FIRST_BYTE);
+		Serial.write(UART_SECOND_BYTE);
+		Serial.write(sizeof(command));
+		ch = 0;
+		for (i = 0; i < sizeof(ExternalCommand); i++)
+		{
+			ch = (ch + data[i]) % 256;
+			Serial.write(data[i]);
+		}
+		Serial.write(ch);
+		Serial.write("\n");
+	}
+}
+
+
+void externalSensorTask(void* args)
+{
+    uint32_t publisherId;
+    LDMap ldmapTemp;
+    Attitude_Data attitudeData;
+    while (true)
+    {
+      if (xTaskNotifyWait(0xffffffff, 0xffffffff, &publisherId, portMAX_DELAY) == pdTRUE)
+      {
+	switch (publisherId)
+	{
+	  case UART_SENSOR:
+	  {
+		  UARTSensor uartSensorReading;
+
+		  if (xQueueReceive(externalSensorQueue, &uartSensorReading, (TickType_t)0) == pdTRUE)
+		  {
+			 
+		  }
+
+		  break;
+
+	  case STATE_DATA:
+		  if (xQueueReceive(stateQueue, &ldmapTemp, (TickType_t)0) == pdTRUE)
+		  {
+		      memcpy(&ldmap, &ldmapTemp, sizeof(LDMap));
+		  }
+		  break;
+	  case MPU_DATA:    
+	      if (xQueueReceive(attitudeQueue, &attitudeData, (TickType_t)0)  == pdTRUE)
+	      {
+		  switch (mpu_state)
+		  {
+		    case RUNNING:	  
+		      if (attitudeData.intertiaAz  < -30)
+			  mpu_state = HOLDING;
+		      break;
+		    case HOLDING:	  
+		      if (abs(attitudeData.intertiaAz) != 0.0 && abs(attitudeData.intertiaAx) != 0.04 && abs(attitudeData.intertiaAy) != 0.04)
+		      { 					    
+			  mpu_state = RUNNING;
+			  globalState = INIT;
+			  localState = INIT;
+			  clock = 0;
+			  Serial.println("---RESETING----");
+		      }
+		  }
+		}
+		  
+		break;
+	     }
+	  }
+      }
+    }
+}
+
+void virtualMachineTask(void* args)
+{
+	UARTCommand command;
+	
+	command.maxTime = 3000;
+	command.speed = 0;
+	command.orientation = 0;
+	command.distance = 0;
+	command.dir = STANDBY;
+	
+	portTickType lastWakeTime = xTaskGetTickCount();
+	while (!systemReady)
+	{
+		vTaskDelayUntil(&lastWakeTime, 1 / portTICK_RATE_MS);
+		if (!blocking)
+		{
+		  blocking = true;
+		  setInstruction(&command);
+		}
+	}
+	while (true)
+	{
+		command.speed = 0;
+		command.distance = 0;
+		command.dir = STANDBY;
+		vTaskDelayUntil(&lastWakeTime, M2T(1));
+
+		if (!blocking)
+		{
+			clock++;
+			// Start a new round
+			blocking = true;
+			switch (globalState)
+			{
+			  case BOOTING:  
+			    ekf_reset();
+			    if (clock > 10) 
+				*globalState = INIT;
+			    break;
+			  default:
+			    newRoundCommand(&command, &ldmap, &uartSensor, &globalState);			
+			}
+			setInstruction(&command);
+			// 	    sendMessageData(&messageData);
+			// send instruction to raspberry pi  
+			// 	    sendTaskToRasp(1,2);
+// 			getCommand(&command);
+		}
+	}
+}
+
+
+
+
